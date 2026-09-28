@@ -565,6 +565,11 @@ if ('serviceWorker' in navigator) {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/><path d="M12 4v0"/></svg>
         <span>Boshqa akkaunt qo'shish</span>
       </div>
+      <div id="add-account-form" style="display:none;padding:14px 20px 6px;border-top:1px solid #E9EDEF;">
+        <input id="new-email" type="email" inputmode="email" autocomplete="off" placeholder="Gmail manzilingiz" style="width:100%;padding:12px;border:1.5px solid #DADCE0;border-radius:10px;font-size:15px;outline:none;-webkit-user-select:text;user-select:text;">
+        <div id="new-email-err" style="color:#EA4335;font-size:12px;margin-top:6px;display:none;">@gmail.com bilan tugaydigan manzil kiriting</div>
+        <div id="new-email-go" style="margin-top:12px;background:#008069;color:#fff;text-align:center;padding:12px;border-radius:10px;font-weight:700;">Davom etish</div>
+      </div>
       <div class="modal-cancel" id="modal-cancel">Bekor qilish</div>
     </div>
   </div>
@@ -974,10 +979,45 @@ document.getElementById('google-login-btn').addEventListener('click', ()=>{
 document.getElementById('modal-cancel').addEventListener('click', ()=>{
   MODAL.style.display = 'none';
 });
-document.getElementById('account-pick-other').addEventListener('click', ()=>{
+function startVerify(email){
+  localStorage.setItem('mchat_email', email);
+  document.getElementById('verify-email').textContent = email;
   MODAL.style.display = 'none';
-  showToast("Bu — demo prototip, real Google akkaunt qo'shilmaydi");
+  SCREEN_LOGIN.style.display = 'none';
+  SCREEN_VERIFY.style.display = 'flex';
+  const boxes = document.querySelectorAll('.code-box');
+  boxes.forEach(b=> b.value = '');
+  document.getElementById('verify-btn').classList.remove('ready');
+  setTimeout(()=> boxes[0].focus(), 200);
+  showToast("Kod " + email + " manziliga yuborildi");
+}
+document.getElementById('account-pick-other').addEventListener('click', ()=>{
+  document.getElementById('add-account-form').style.display = 'block';
+  setTimeout(()=> document.getElementById('new-email').focus(), 100);
 });
+document.getElementById('new-email-go').addEventListener('click', ()=>{
+  const v = document.getElementById('new-email').value.trim().toLowerCase();
+  const ok = /^[a-z0-9._+-]+@gmail\.com$/.test(v);
+  document.getElementById('new-email-err').style.display = ok ? 'none' : 'block';
+  if(ok) startVerify(v);
+});
+document.getElementById('account-pick-1').addEventListener('click', ()=>{
+  localStorage.setItem('mchat_email', 'foydalanuvchi@gmail.com');
+  document.getElementById('verify-email').textContent = 'foydalanuvchi@gmail.com';
+});
+document.getElementById('google-login-btn').addEventListener('click', ()=>{
+  document.getElementById('add-account-form').style.display = 'none';
+  document.getElementById('new-email').value = '';
+});
+function applyProfile(){
+  const e = localStorage.getItem('mchat_email');
+  if(!e) return;
+  const n = document.querySelector('.settings-name');
+  const s = document.querySelector('.settings-sub');
+  if(n) n.textContent = e.split('@')[0];
+  if(s) s.textContent = e;
+}
+applyProfile();
 document.getElementById('account-pick-1').addEventListener('click', ()=>{
   MODAL.style.display = 'none';
   SCREEN_LOGIN.style.display = 'none';
@@ -1018,6 +1058,7 @@ const logoutRow = document.getElementById('logout-row');
 if(logoutRow){
   logoutRow.addEventListener('click', ()=>{
     localStorage.removeItem('mchat_authed');
+    localStorage.removeItem('mchat_email');
     location.reload();
   });
 }
