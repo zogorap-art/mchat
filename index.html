@@ -597,7 +597,7 @@ if ('serviceWorker' in navigator) {
     </div>
   </div>
 
-  <div class="screen hidden-right" id="screen-chats">
+  <div class="screen" id="screen-chats">
     <div class="top-header">
       <div class="top-header-row">
         <div class="brand">
@@ -966,11 +966,14 @@ function finishAuth(){
   localStorage.setItem('mchat_authed', '1');
   SCREEN_LOGIN.style.display = 'none';
   SCREEN_VERIFY.style.display = 'none';
+  goTo('screen-chats');
+  applyProfile();
 }
 
 if(localStorage.getItem('mchat_authed') === '1'){
   SCREEN_LOGIN.style.display = 'none';
   SCREEN_VERIFY.style.display = 'none';
+  goTo('screen-chats');
 }
 
 document.getElementById('google-login-btn').addEventListener('click', ()=>{
