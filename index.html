@@ -977,6 +977,9 @@ if(localStorage.getItem('mchat_authed') === '1'){
 }
 
 document.getElementById('google-login-btn').addEventListener('click', ()=>{
+  document.getElementById('add-account-form').style.display = 'none';
+  document.getElementById('new-email').value = '';
+  document.getElementById('new-email-err').style.display = 'none';
   MODAL.style.display = 'flex';
 });
 document.getElementById('modal-cancel').addEventListener('click', ()=>{
@@ -1005,12 +1008,7 @@ document.getElementById('new-email-go').addEventListener('click', ()=>{
   if(ok) startVerify(v);
 });
 document.getElementById('account-pick-1').addEventListener('click', ()=>{
-  localStorage.setItem('mchat_email', 'foydalanuvchi@gmail.com');
-  document.getElementById('verify-email').textContent = 'foydalanuvchi@gmail.com';
-});
-document.getElementById('google-login-btn').addEventListener('click', ()=>{
-  document.getElementById('add-account-form').style.display = 'none';
-  document.getElementById('new-email').value = '';
+  startVerify('foydalanuvchi@gmail.com');
 });
 function applyProfile(){
   const e = localStorage.getItem('mchat_email');
@@ -1021,16 +1019,6 @@ function applyProfile(){
   if(s) s.textContent = e;
 }
 applyProfile();
-document.getElementById('account-pick-1').addEventListener('click', ()=>{
-  MODAL.style.display = 'none';
-  SCREEN_LOGIN.style.display = 'none';
-  SCREEN_VERIFY.style.display = 'flex';
-  const boxes = document.querySelectorAll('.code-box');
-  boxes.forEach(b=> b.value = '');
-  document.getElementById('verify-btn').classList.remove('ready');
-  setTimeout(()=> boxes[0].focus(), 200);
-  showToast("Kod gmail.com manzilingizga yuborildi");
-});
 
 const codeBoxes = document.querySelectorAll('.code-box');
 const verifyBtn = document.getElementById('verify-btn');
