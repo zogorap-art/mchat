@@ -15,7 +15,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
   var firebaseConfig = {
-    apiKey: "AIzaSyBBfQz4lRThvsKZhH_qFKsb5R9RMkm7Z_g",
+    apiKey: "AIzaSyBBfQz4lRThvsKZhH_qfKsb5R9RMkm7Z_g",
     authDomain: "mchat-5e7cc.firebaseapp.com",
     projectId: "mchat-5e7cc",
     storageBucket: "mchat-5e7cc.firebasestorage.app",
@@ -419,45 +419,42 @@ if ('serviceWorker' in navigator) {
   .auth-screen{
     position:absolute; inset:0;
     display:flex; flex-direction:column;
-    background:#F0F2F5;
+    background:linear-gradient(160deg,#075E54 0%, #008069 100%);
     z-index:20;
   }
   .auth-top{
     flex:1;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
     color:#fff;
-    padding:32px 20px;
-    background:linear-gradient(160deg,#075E54 0%, #008069 100%);
+    padding:32px 20px 12px;
   }
   .auth-logo{
-    width:110px; height:110px; border-radius:28px;
+    width:160px; height:160px; border-radius:40px;
     object-fit:cover;
     box-shadow:0 10px 30px rgba(0,0,0,.25);
-    margin-bottom:18px;
+    margin-bottom:20px;
   }
-  .auth-title{ font-size:26px; font-weight:800; letter-spacing:.3px; }
+  .auth-title{ font-size:28px; font-weight:800; letter-spacing:.3px; }
   .auth-sub{ font-size:13.5px; color:rgba(255,255,255,.85); margin-top:6px; text-align:center; }
   .auth-bottom{
-    background:#fff;
-    border-radius:24px 24px 0 0;
-    padding:26px 22px calc(30px + env(safe-area-inset-bottom));
+    padding:18px 24px calc(30px + env(safe-area-inset-bottom));
     display:flex; flex-direction:column; gap:14px;
-    box-shadow:0 -6px 24px rgba(0,0,0,.08);
   }
-  .auth-heading{ font-size:18px; font-weight:700; color:var(--text-dark); text-align:center; }
-  .auth-desc{ font-size:13px; color:var(--text-grey); text-align:center; margin-top:-8px; margin-bottom:4px; }
+  .auth-heading{ font-size:18px; font-weight:700; color:#fff; text-align:center; }
+  .auth-desc{ font-size:13px; color:rgba(255,255,255,.8); text-align:center; margin-top:-8px; margin-bottom:4px; }
   .google-btn{
     display:flex; align-items:center; justify-content:center; gap:10px;
     background:#fff;
-    border:1.5px solid #DADCE0;
+    border:none;
     border-radius:10px;
-    padding:13px;
+    padding:14px;
     font-size:15px; font-weight:600;
     color:#3C4043;
+    box-shadow:0 4px 14px rgba(0,0,0,.2);
   }
-  .google-btn:active{ background:#F8F9FA; }
+  .google-btn:active{ background:#F1F1F1; }
   .google-btn svg{ width:20px; height:20px; }
-  .auth-fineprint{ font-size:11.5px; color:var(--text-grey); text-align:center; line-height:1.5; margin-top:2px; }
+  .auth-fineprint{ font-size:11.5px; color:rgba(255,255,255,.7); text-align:center; line-height:1.5; margin-top:2px; }
 
   /* Account picker modal */
   .modal-overlay{
