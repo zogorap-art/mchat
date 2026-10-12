@@ -416,25 +416,62 @@ if ('serviceWorker' in navigator) {
   .toast.show{ opacity:.95; }
   .call-overlay{
     position:absolute; inset:0; z-index:60;
-    background:linear-gradient(160deg,#075E54 0%, #008069 100%);
-    display:flex; flex-direction:column; align-items:center;
-    color:#fff; padding:60px 24px 40px;
+    background:#1c1c1e;
+    overflow:hidden;
   }
-  .call-overlay img{
+  .call-video-bg{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    object-fit:cover;
+    background:#1c1c1e;
+    display:none;
+  }
+  .call-overlay.video-on .call-video-bg{ display:block; }
+  .call-overlay.video-on .call-avatar-voice{ display:none; }
+  .call-avatar-voice{
+    position:absolute; top:40%; left:50%; transform:translate(-50%,-50%);
     width:120px; height:120px; border-radius:50%;
-    object-fit:cover; margin-top:30px; margin-bottom:18px;
+    object-fit:cover;
     box-shadow:0 10px 30px rgba(0,0,0,.3);
   }
-  .call-overlay .call-name{ font-size:22px; font-weight:700; color:#fff; }
-  .call-overlay .call-status{ font-size:14px; color:rgba(255,255,255,.8); margin-top:6px; }
-  .call-overlay .call-end{
-    margin-top:auto;
-    width:64px; height:64px; border-radius:50%;
-    background:#EA4335;
-    display:flex; align-items:center; justify-content:center;
-    box-shadow:0 4px 14px rgba(0,0,0,.3);
+  .call-top{
+    position:absolute; top:0; left:0; right:0;
+    padding:calc(18px + env(safe-area-inset-top)) 90px 40px 24px;
+    background:linear-gradient(180deg, rgba(0,0,0,.55) 0%, transparent 100%);
+    color:#fff; z-index:2;
   }
-  .call-overlay .call-end svg{ width:28px; height:28px; color:#fff; transform:rotate(135deg); }
+  .call-top .call-name{ font-size:21px; font-weight:700; color:#fff; }
+  .call-top .call-status{ font-size:14px; color:rgba(255,255,255,.85); margin-top:3px; }
+  .call-side-btns{
+    position:absolute; top:calc(14px + env(safe-area-inset-top)); right:14px;
+    display:flex; flex-direction:column; gap:14px; z-index:3;
+  }
+  .call-side-btn{
+    width:44px; height:44px; border-radius:50%;
+    background:rgba(60,60,60,.7);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .call-side-btn svg{ width:21px; height:21px; color:#fff; }
+  .call-bottom-pill{
+    position:absolute; left:14px; right:14px; bottom:calc(22px + env(safe-area-inset-bottom));
+    background:rgba(40,40,40,.85);
+    border-radius:40px;
+    display:flex; align-items:center; justify-content:space-around;
+    padding:10px 6px;
+    z-index:3;
+  }
+  .call-pill-btn{
+    width:52px; height:52px; border-radius:50%;
+    background:rgba(255,255,255,.18);
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  .call-pill-btn.active{ background:#fff; }
+  .call-pill-btn.active svg{ color:#1c1c1e; }
+  .call-pill-btn svg{ width:22px; height:22px; color:#fff; }
+  .call-pill-btn.call-end{ background:#EA4335; }
+  .call-pill-btn.call-end svg{ transform:rotate(135deg); }
+  .call-pill-dots{ color:#fff; font-size:22px; font-weight:700; letter-spacing:1px; }
 
 
   /* ---------- Auth screens ---------- */
@@ -797,13 +834,25 @@ if ('serviceWorker' in navigator) {
   </div>
 
   <div class="call-overlay" id="call-overlay" style="display:none;">
-  <img id="call-avatar" src="" alt="">
-  <div class="call-name" id="call-name"></div>
-  <div class="call-status" id="call-status">Qo'ng'iroq qilinmoqda...</div>
-  <div class="call-end" id="call-end-btn">
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8c1.4 2.7 3.7 5 6.4 6.4l2.1-2.1c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.7 21 3 13.3 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1L6.6 10.8z"/></svg>
+    <video class="call-video-bg" id="call-video" autoplay playsinline muted></video>
+    <img class="call-avatar-voice" id="call-avatar" src="" alt="">
+    <div class="call-top">
+      <div class="call-name" id="call-name"></div>
+      <div class="call-status" id="call-status">Qo'ng'iroq qilinmoqda...</div>
+    </div>
+    <div class="call-side-btns" id="call-side-btns">
+      <div class="call-side-btn" id="call-addperson-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></div>
+      <div class="call-side-btn" id="call-flip-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></div>
+      <div class="call-side-btn" id="call-fx-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 4V2m0 20v-2M8 9h2M20 9h2M17.8 11.8L19 13M15 9h0M17.8 6.2L19 5M3 21l9-9"/><path d="M12.2 6.2L11 5"/></svg></div>
+    </div>
+    <div class="call-bottom-pill">
+      <div class="call-pill-btn" id="call-more-btn"><span class="call-pill-dots">&#8942;</span></div>
+      <div class="call-pill-btn" id="call-cam-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+      <div class="call-pill-btn" id="call-speaker-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></div>
+      <div class="call-pill-btn" id="call-mute-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg></div>
+      <div class="call-pill-btn call-end" id="call-end-btn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8c1.4 2.7 3.7 5 6.4 6.4l2.1-2.1c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.7 21 3 13.3 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1L6.6 10.8z"/></svg></div>
+    </div>
   </div>
-</div>
 <input type="file" id="avatar-file-input" accept="image/*" style="display:none;">
 <div class="toast" id="toast"></div>
 </div>
@@ -1004,12 +1053,66 @@ document.getElementById('chat-search').addEventListener('input', function(){
   });
 });
 
+let callStream = null;
+let callIsVideo = false;
+let callFacingMode = 'user';
+let callMicOn = true;
+let callCamOn = true;
+let callSpeakerOn = true;
+
+async function startCallMedia(isVideo){
+  try{
+    const constraints = isVideo
+      ? { video: { facingMode: callFacingMode }, audio: true }
+      : { video: false, audio: true };
+    callStream = await navigator.mediaDevices.getUserMedia(constraints);
+    const videoEl = document.getElementById('call-video');
+    if(isVideo){
+      videoEl.srcObject = callStream;
+      document.getElementById('call-overlay').classList.add('video-on');
+    }
+    callMicOn = true;
+    callCamOn = isVideo;
+  }catch(err){
+    showToast("Kamera/mikrofonga ruxsat berilmadi");
+  }
+}
+
+function stopCallMedia(){
+  if(callStream){
+    callStream.getTracks().forEach(t=> t.stop());
+    callStream = null;
+  }
+  const videoEl = document.getElementById('call-video');
+  videoEl.srcObject = null;
+  document.getElementById('call-overlay').classList.remove('video-on');
+}
+
+function setCallIcon(btnId, svgInner){
+  const btn = document.getElementById(btnId);
+  if(btn) btn.innerHTML = svgInner;
+}
+
+function updateCallButtons(){
+  const micBtn = document.getElementById('call-mute-btn');
+  const camBtn = document.getElementById('call-cam-btn');
+  const spkBtn = document.getElementById('call-speaker-btn');
+  if(micBtn) micBtn.classList.toggle('active', !callMicOn);
+  if(camBtn) camBtn.classList.toggle('active', !callCamOn);
+  if(spkBtn) spkBtn.classList.toggle('active', callSpeakerOn);
+  document.getElementById('call-side-btns').style.display = callIsVideo ? 'flex' : 'none';
+  document.getElementById('call-cam-btn').style.display = callIsVideo ? 'flex' : 'none';
+}
+
 function openCallScreen(contactName, contactAvatar, isVideo){
   const overlay = document.getElementById('call-overlay');
   document.getElementById('call-avatar').src = contactAvatar || LOGO;
   document.getElementById('call-name').textContent = contactName || 'M-CHAT';
   document.getElementById('call-status').textContent = (isVideo ? "Video qo'ng'iroq..." : "Ovozli qo'ng'iroq...") ;
-  overlay.style.display = 'flex';
+  callIsVideo = isVideo;
+  overlay.style.display = 'block';
+  updateCallButtons();
+  startCallMedia(isVideo);
   let seconds = 0;
   const statusEl = document.getElementById('call-status');
   const timer = setInterval(()=>{
@@ -1024,9 +1127,56 @@ function closeCallScreen(){
   const overlay = document.getElementById('call-overlay');
   const t = overlay.dataset.timerId;
   if(t) clearInterval(Number(t));
+  stopCallMedia();
   overlay.style.display = 'none';
 }
 document.getElementById('call-end-btn').addEventListener('click', closeCallScreen);
+
+document.getElementById('call-mute-btn').addEventListener('click', ()=>{
+  callMicOn = !callMicOn;
+  if(callStream){
+    callStream.getAudioTracks().forEach(t=> t.enabled = callMicOn);
+  }
+  updateCallButtons();
+  showToast(callMicOn ? "Mikrofon yoqildi" : "Mikrofon o'chirildi");
+});
+
+document.getElementById('call-cam-btn').addEventListener('click', ()=>{
+  if(!callIsVideo) return;
+  callCamOn = !callCamOn;
+  if(callStream){
+    callStream.getVideoTracks().forEach(t=> t.enabled = callCamOn);
+  }
+  updateCallButtons();
+  showToast(callCamOn ? "Kamera yoqildi" : "Kamera o'chirildi");
+});
+
+document.getElementById('call-speaker-btn').addEventListener('click', ()=>{
+  callSpeakerOn = !callSpeakerOn;
+  updateCallButtons();
+  showToast(callSpeakerOn ? "Karnay yoqildi" : "Quloqqa o'tkazildi");
+});
+
+document.getElementById('call-flip-btn').addEventListener('click', async ()=>{
+  if(!callIsVideo) return;
+  callFacingMode = (callFacingMode === 'user') ? 'environment' : 'user';
+  if(callStream){
+    callStream.getTracks().forEach(t=> t.stop());
+  }
+  await startCallMedia(true);
+  callCamOn = true;
+  updateCallButtons();
+});
+
+document.getElementById('call-addperson-btn').addEventListener('click', ()=>{
+  showToast("Qatnashuvchi qo'shish hali mavjud emas");
+});
+document.getElementById('call-fx-btn').addEventListener('click', ()=>{
+  showToast("Effektlar hali mavjud emas");
+});
+document.getElementById('call-more-btn').addEventListener('click', ()=>{
+  showToast("Qo'shimcha sozlamalar hali mavjud emas");
+});
 
 document.getElementById('video-call-btn').addEventListener('click', ()=>{
   const nameEl = document.getElementById('detail-name');
