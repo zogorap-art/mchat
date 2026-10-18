@@ -248,6 +248,32 @@ if ('serviceWorker' in navigator) {
   .chat-header-status{ font-size:12.5px; color:rgba(255,255,255,.8); }
   .chat-header .icon-btn{ opacity:.95; }
   .chat-header-icons{ display:flex; gap:18px; align-items:center; }
+  .chat-menu-dropdown{
+    position:absolute; top:34px; right:0;
+    background:#fff; border-radius:10px;
+    box-shadow:0 4px 18px rgba(0,0,0,.2);
+    min-width:170px; z-index:40; overflow:hidden;
+  }
+  .chat-menu-item{
+    padding:13px 16px; font-size:14.5px; color:var(--text-dark);
+    border-bottom:1px solid var(--divider);
+  }
+  .chat-menu-item:last-child{ border-bottom:none; }
+  .chat-menu-item:active{ background:#F5F6F6; }
+
+  .wallpaper-preview{
+    width:100%; height:200px; border-radius:12px;
+    background-color:var(--bg-chat); background-size:cover; background-position:center;
+    margin-bottom:18px; display:flex; align-items:center; justify-content:center;
+    color:var(--text-grey); font-size:13px;
+  }
+  .fontsize-option{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 4px; border-bottom:1px solid var(--divider);
+  }
+  .fontsize-option.selected{ color:var(--teal); font-weight:700; }
+  .fontsize-option svg{ width:20px; height:20px; color:var(--teal); visibility:hidden; }
+  .fontsize-option.selected svg{ visibility:visible; }
 
   .messages{
     flex:1;
@@ -275,7 +301,7 @@ if ('serviceWorker' in navigator) {
     max-width:78%;
     padding:6px 9px 8px 9px;
     border-radius:8px;
-    font-size:14.5px;
+    font-size:var(--msg-font-size, 14.5px);
     line-height:1.35;
     color:var(--text-dark);
     position:relative;
@@ -833,7 +859,12 @@ if ('serviceWorker' in navigator) {
       <div class="chat-header-icons">
         <div class="icon-btn" id="video-call-btn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3.5l4 4v-11l-4 4z"/></svg></div>
         <div class="icon-btn" id="voice-call-btn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8c1.4 2.7 3.7 5 6.4 6.4l2.1-2.1c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.7 21 3 13.3 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1L6.6 10.8z"/></svg></div>
-        <div class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></div>
+        <div class="icon-btn" id="chat-menu-btn" style="position:relative;"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+          <div class="chat-menu-dropdown" id="chat-menu-dropdown" style="display:none;">
+            <div class="chat-menu-item" id="menu-wallpaper-btn">Oboy</div>
+            <div class="chat-menu-item" id="menu-fontsize-btn">Shrift o'lchami</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -992,6 +1023,41 @@ if ('serviceWorker' in navigator) {
     <div class="detail-body" id="settings-detail-body"></div>
   </div>
 
+  <div class="screen hidden-right" id="screen-wallpaper">
+    <div class="detail-header">
+      <div class="icon-btn" id="wallpaper-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M15 18l-6-6 6-6"/></svg></div>
+      <div class="detail-title">Oboy</div>
+    </div>
+    <div class="detail-body">
+      <div class="wallpaper-preview" id="wallpaper-preview">Oldindan ko'rish</div>
+      <div class="detail-btn" id="wallpaper-choose-btn">Rasm tanlash</div>
+      <div class="detail-btn detail-btn-danger" id="wallpaper-reset-btn">Standart holatga qaytarish</div>
+      <input type="file" id="wallpaper-file-input" accept="image/*" style="display:none;">
+      <div class="detail-desc">Tanlangan rasm faqat shu suhbat uchun orqa fon bo'lib, shu qurilmada saqlanadi.</div>
+    </div>
+  </div>
+
+  <div class="screen hidden-right" id="screen-fontsize">
+    <div class="detail-header">
+      <div class="icon-btn" id="fontsize-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M15 18l-6-6 6-6"/></svg></div>
+      <div class="detail-title">Shrift o'lchami</div>
+    </div>
+    <div class="detail-body">
+      <div class="fontsize-option" id="fontsize-small" data-size="13">
+        <span style="font-size:13px;">Kichik</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>
+      </div>
+      <div class="fontsize-option" id="fontsize-medium" data-size="14.5">
+        <span style="font-size:15px;">O'rta</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>
+      </div>
+      <div class="fontsize-option" id="fontsize-large" data-size="18">
+        <span style="font-size:18px;">Katta</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 </div>
 
@@ -1070,6 +1136,16 @@ function renderCalls(){
   `).join('');
 }
 
+function applyChatWallpaper(chatId){
+  const wp = localStorage.getItem('mchat_wallpaper_' + chatId);
+  const msgsEl = document.getElementById('messages');
+  if(wp){
+    msgsEl.style.backgroundImage = `url("${wp}")`;
+  }else{
+    msgsEl.style.backgroundImage = 'none';
+  }
+}
+
 function openChat(id){
   activeChatId = id;
   const chat = chats.find(c=>c.id===id);
@@ -1080,6 +1156,7 @@ function openChat(id){
   document.getElementById('detail-name').textContent = chat.name;
   document.getElementById('detail-status').textContent = chat.online ? 'onlayn' : "oxirgi marta bugun ko'rilgan";
   renderMessages(chat);
+  applyChatWallpaper(id);
   goTo('screen-chat-detail');
 }
 
@@ -1146,7 +1223,7 @@ document.getElementById('messages').addEventListener('click', (e)=>{
 });
 
 function goTo(screenId){
-  const all = ['screen-chats','screen-status','screen-calls','screen-settings','screen-chat-detail','screen-profile-edit','screen-settings-detail'];
+  const all = ['screen-chats','screen-status','screen-calls','screen-settings','screen-chat-detail','screen-profile-edit','screen-settings-detail','screen-wallpaper','screen-fontsize'];
   all.forEach(id=>{
     const el = document.getElementById(id);
     if(id === screenId) el.classList.remove('hidden-right');
@@ -1857,6 +1934,83 @@ if(logoutRow){
     location.reload();
   });
 }
+
+/* ================= CHAT MENU: WALLPAPER & FONT SIZE ================= */
+const chatMenuBtn = document.getElementById('chat-menu-btn');
+const chatMenuDropdown = document.getElementById('chat-menu-dropdown');
+chatMenuBtn.addEventListener('click', (e)=>{
+  e.stopPropagation();
+  chatMenuDropdown.style.display = (chatMenuDropdown.style.display === 'block') ? 'none' : 'block';
+});
+document.addEventListener('click', ()=>{ chatMenuDropdown.style.display = 'none'; });
+
+document.getElementById('menu-wallpaper-btn').addEventListener('click', (e)=>{
+  e.stopPropagation();
+  chatMenuDropdown.style.display = 'none';
+  const wp = activeChatId!==null ? localStorage.getItem('mchat_wallpaper_' + activeChatId) : null;
+  const preview = document.getElementById('wallpaper-preview');
+  if(wp){
+    preview.style.backgroundImage = `url("${wp}")`;
+    preview.textContent = '';
+  }else{
+    preview.style.backgroundImage = 'none';
+    preview.textContent = "Oldindan ko'rish";
+  }
+  goTo('screen-wallpaper');
+});
+
+document.getElementById('menu-fontsize-btn').addEventListener('click', (e)=>{
+  e.stopPropagation();
+  chatMenuDropdown.style.display = 'none';
+  const current = localStorage.getItem('mchat_fontsize') || '14.5';
+  document.querySelectorAll('.fontsize-option').forEach(el=>{
+    el.classList.toggle('selected', el.dataset.size === current);
+  });
+  goTo('screen-fontsize');
+});
+
+document.getElementById('wallpaper-back').addEventListener('click', ()=> goTo('screen-chat-detail'));
+document.getElementById('fontsize-back').addEventListener('click', ()=> goTo('screen-chat-detail'));
+
+const wallpaperFileInput = document.getElementById('wallpaper-file-input');
+document.getElementById('wallpaper-choose-btn').addEventListener('click', ()=> wallpaperFileInput.click());
+wallpaperFileInput.addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file || activeChatId===null) return;
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    const dataUrl = ev.target.result;
+    localStorage.setItem('mchat_wallpaper_' + activeChatId, dataUrl);
+    document.getElementById('wallpaper-preview').style.backgroundImage = `url("${dataUrl}")`;
+    document.getElementById('wallpaper-preview').textContent = '';
+    applyChatWallpaper(activeChatId);
+    showToast("Oboy o'rnatildi");
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById('wallpaper-reset-btn').addEventListener('click', ()=>{
+  if(activeChatId===null) return;
+  localStorage.removeItem('mchat_wallpaper_' + activeChatId);
+  document.getElementById('wallpaper-preview').style.backgroundImage = 'none';
+  document.getElementById('wallpaper-preview').textContent = "Oldindan ko'rish";
+  applyChatWallpaper(activeChatId);
+  showToast("Standart oboyga qaytarildi");
+});
+
+function applyFontSize(px){
+  document.documentElement.style.setProperty('--msg-font-size', px + 'px');
+}
+document.querySelectorAll('.fontsize-option').forEach(el=>{
+  el.addEventListener('click', ()=>{
+    const size = el.dataset.size;
+    localStorage.setItem('mchat_fontsize', size);
+    applyFontSize(size);
+    document.querySelectorAll('.fontsize-option').forEach(o=> o.classList.toggle('selected', o===el));
+    showToast("Shrift o'lchami o'zgartirildi");
+    setTimeout(()=> goTo('screen-chat-detail'), 300);
+  });
+});
+applyFontSize(localStorage.getItem('mchat_fontsize') || '14.5');
 
 </script>
 </body>
