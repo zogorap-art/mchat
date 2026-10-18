@@ -332,6 +332,52 @@ if ('serviceWorker' in navigator) {
   }
   .send-btn svg{ width:20px; height:20px; color:#fff; }
 
+  .recording-bar{
+    flex:1;
+    background:#fff;
+    border-radius:22px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:10px 16px;
+    min-height:22px;
+  }
+  .rec-dot{
+    width:11px; height:11px; border-radius:50%;
+    background:#EA4335;
+    animation:recblink 1s infinite;
+    flex-shrink:0;
+  }
+  @keyframes recblink{ 0%,100%{opacity:1;} 50%{opacity:.25;} }
+  .rec-timer{ font-size:15px; color:var(--text-dark); font-variant-numeric:tabular-nums; }
+  .rec-hint{ flex:1; font-size:13px; color:var(--text-grey); text-align:center; }
+  .rec-cancel{
+    width:34px; height:34px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    color:#EA4335; flex-shrink:0;
+  }
+  .rec-cancel svg{ width:20px; height:20px; }
+
+  .voice-bubble{
+    display:flex; align-items:center; gap:8px;
+    min-width:190px;
+  }
+  .voice-play-btn{
+    width:34px; height:34px; border-radius:50%;
+    background:var(--teal);
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0; cursor:pointer;
+  }
+  .voice-play-btn svg{ width:16px; height:16px; color:#fff; }
+  .voice-wave{
+    flex:1; display:flex; align-items:center; gap:2px; height:22px;
+  }
+  .voice-wave span{
+    width:2.5px; background:#8DA6A3; border-radius:2px; flex-shrink:0;
+  }
+  .bubble.out .voice-wave span{ background:#6FA895; }
+  .voice-duration{ font-size:11.5px; color:var(--text-grey); flex-shrink:0; }
+
   /* ---------- Status screen ---------- */
   .status-list{ flex:1; overflow-y:auto; background:#fff; }
   .status-section-title{
@@ -794,13 +840,19 @@ if ('serviceWorker' in navigator) {
     <div class="messages" id="messages"></div>
 
     <div class="input-bar">
-      <div class="input-pill">
+      <div class="input-pill" id="input-pill">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
         <textarea id="msg-input" rows="1" placeholder="Xabar yozing"></textarea>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M21 3l-9 9"/><path d="M14 3h7v7"/></svg>
       </div>
+      <div class="recording-bar" id="recording-bar" style="display:none;">
+        <div class="rec-dot"></div>
+        <div class="rec-timer" id="rec-timer">00:00</div>
+        <div class="rec-hint">Yuborish uchun bosing</div>
+        <div class="rec-cancel" id="rec-cancel-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></div>
+      </div>
       <div class="send-btn" id="send-btn">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 20l18-8L3 4v6l13 2-13 2z"/></svg>
+        <svg id="send-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
       </div>
     </div>
   </div>
@@ -1031,18 +1083,67 @@ function openChat(id){
   goTo('screen-chat-detail');
 }
 
+function voiceWaveBars(seed){
+  let bars = '';
+  for(let i=0;i<24;i++){
+    const h = 6 + Math.round(((Math.sin(i*1.7+seed)+1)/2) * 16);
+    bars += `<span style="height:${h}px"></span>`;
+  }
+  return bars;
+}
+
 function renderMessages(chat){
   const wrap = document.getElementById('messages');
-  wrap.innerHTML = '<div class="day-chip">BUGUN</div>' + chat.messages.map(m => `
+  wrap.innerHTML = '<div class="day-chip">BUGUN</div>' + chat.messages.map((m,i) => {
+    if(m.type === 'voice'){
+      return `
+    <div class="bubble-row ${m.from==='out'?'out':''}">
+      <div class="bubble ${m.from}">
+        <div class="voice-bubble" data-audio-id="voice-${chat.id}-${i}">
+          <div class="voice-play-btn" data-role="play"><svg data-role="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+          <div class="voice-wave">${voiceWaveBars(i)}</div>
+          <div class="voice-duration">${m.duration || '0:00'}</div>
+          <audio data-role="audio" id="voice-${chat.id}-${i}" src="${m.audio}" preload="none"></audio>
+        </div>
+        <span class="bubble-meta">${m.time}${m.from==='out' ? (m.read ? ' <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12l5 5L18 6"/><path d="M9 12l5 5L28 3" transform="translate(-8)"/></svg>' : '') : ''}</span>
+      </div>
+    </div>
+  `;
+    }
+    return `
     <div class="bubble-row ${m.from==='out'?'out':''}">
       <div class="bubble ${m.from}">
         <span class="bubble-text">${m.text}</span>
         <span class="bubble-meta">${m.time}${m.from==='out' ? (m.read ? ' <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12l5 5L18 6"/><path d="M9 12l5 5L28 3" transform="translate(-8)"/></svg>' : '') : ''}</span>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
   wrap.scrollTop = wrap.scrollHeight;
 }
+
+document.getElementById('messages').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.voice-play-btn');
+  if(!btn) return;
+  const wrapEl = btn.closest('.voice-bubble');
+  const audio = wrapEl.querySelector('audio');
+  const icon = btn.querySelector('svg');
+  document.querySelectorAll('.voice-bubble audio').forEach(a=>{
+    if(a !== audio && !a.paused){
+      a.pause();
+      const otherBtn = a.closest('.voice-bubble').querySelector('.voice-play-btn svg');
+      if(otherBtn) otherBtn.innerHTML = '<path d="M8 5v14l11-7z"/>';
+    }
+  });
+  if(audio.paused){
+    audio.play();
+    icon.innerHTML = '<rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/>';
+  }else{
+    audio.pause();
+    icon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+  }
+  audio.onended = ()=>{ icon.innerHTML = '<path d="M8 5v14l11-7z"/>'; };
+});
 
 function goTo(screenId){
   const all = ['screen-chats','screen-status','screen-calls','screen-settings','screen-chat-detail','screen-profile-edit','screen-settings-detail'];
@@ -1087,6 +1188,7 @@ function sendMessage(){
   chat.time = nowTime();
   input.value = '';
   input.style.height = 'auto';
+  updateSendBtnIcon();
   renderMessages(chat);
   saveChats();
   renderChatList();
@@ -1130,14 +1232,170 @@ function notifyNewMessage(fromName, text){
   }
 }
 
-document.getElementById('send-btn').addEventListener('click', sendMessage);
+const SEND_ICON = '<path d="M3 20l18-8L3 4v6l13 2-13 2z"/>';
+const MIC_ICON_STROKE = '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>';
+
+function updateSendBtnIcon(){
+  const icon = document.getElementById('send-btn-icon');
+  const hasText = document.getElementById('msg-input').value.trim().length > 0;
+  if(isRecording) return;
+  if(hasText){
+    icon.setAttribute('fill','currentColor');
+    icon.setAttribute('stroke','none');
+    icon.innerHTML = SEND_ICON;
+  }else{
+    icon.setAttribute('fill','none');
+    icon.setAttribute('stroke','currentColor');
+    icon.setAttribute('stroke-width','2');
+    icon.innerHTML = MIC_ICON_STROKE;
+  }
+}
+
+let isRecording = false;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingStream = null;
+let recordingSeconds = 0;
+let recordingTimerId = null;
+let recordingCancelled = false;
+
+function pad2(n){ return n<10 ? '0'+n : ''+n; }
+
+async function startRecording(){
+  if(activeChatId===null) return;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    showToast("Bu brauzer ovoz yozishni qo'llamaydi");
+    return;
+  }
+  try{
+    recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  }catch(err){
+    showToast("Mikrofonga ruxsat berilmadi");
+    return;
+  }
+  recordedChunks = [];
+  recordingCancelled = false;
+  try{
+    mediaRecorder = new MediaRecorder(recordingStream);
+  }catch(err){
+    showToast("Ovoz yozish bu qurilmada ishlamaydi");
+    recordingStream.getTracks().forEach(t=>t.stop());
+    return;
+  }
+  mediaRecorder.ondataavailable = (e)=>{ if(e.data && e.data.size>0) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = onRecordingStop;
+  mediaRecorder.start();
+  isRecording = true;
+  recordingSeconds = 0;
+  document.getElementById('input-pill').style.display = 'none';
+  document.getElementById('recording-bar').style.display = 'flex';
+  document.getElementById('rec-timer').textContent = '00:00';
+  const sendIcon = document.getElementById('send-btn-icon');
+  sendIcon.setAttribute('fill','none');
+  sendIcon.setAttribute('stroke','currentColor');
+  sendIcon.setAttribute('stroke-width','2');
+  sendIcon.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
+  recordingTimerId = setInterval(()=>{
+    recordingSeconds++;
+    const m = Math.floor(recordingSeconds/60);
+    const s = recordingSeconds%60;
+    document.getElementById('rec-timer').textContent = pad2(m) + ':' + pad2(s);
+  }, 1000);
+}
+
+function teardownRecordingUI(){
+  isRecording = false;
+  clearInterval(recordingTimerId);
+  document.getElementById('input-pill').style.display = 'flex';
+  document.getElementById('recording-bar').style.display = 'none';
+  if(recordingStream){
+    recordingStream.getTracks().forEach(t=>t.stop());
+    recordingStream = null;
+  }
+  updateSendBtnIcon();
+}
+
+function stopAndSendRecording(){
+  if(!isRecording || !mediaRecorder) return;
+  recordingCancelled = false;
+  mediaRecorder.stop();
+}
+
+function cancelRecording(){
+  if(!isRecording || !mediaRecorder) return;
+  recordingCancelled = true;
+  mediaRecorder.stop();
+}
+
+function onRecordingStop(){
+  const wasCancelled = recordingCancelled;
+  const durationSec = recordingSeconds;
+  teardownRecordingUI();
+  if(wasCancelled || recordedChunks.length === 0){
+    recordedChunks = [];
+    return;
+  }
+  const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+  recordedChunks = [];
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    sendVoiceMessage(ev.target.result, durationSec);
+  };
+  reader.readAsDataURL(blob);
+}
+
+function sendVoiceMessage(dataUrl, durationSec){
+  const chat = chats.find(c=>c.id===activeChatId);
+  if(!chat) return;
+  const m = Math.floor(durationSec/60), s = durationSec%60;
+  const durationLabel = m + ':' + pad2(s);
+  chat.messages.push({ from:'out', type:'voice', audio: dataUrl, duration: durationLabel, time: nowTime(), read:false });
+  chat.last = 'Siz: 🎤 Ovozli xabar';
+  chat.time = nowTime();
+  renderMessages(chat);
+  saveChats();
+  renderChatList();
+
+  setTimeout(()=>{
+    chat.messages.forEach(mm=>{ if(mm.from==='out') mm.read = true; });
+    renderMessages(chat);
+    saveChats();
+  }, 700);
+
+  setTimeout(()=>{
+    const reply = foxReplies[Math.floor(Math.random()*foxReplies.length)];
+    chat.messages.push({from:'in', text:reply, time:nowTime()});
+    chat.last = reply;
+    chat.time = nowTime();
+    renderMessages(chat);
+    saveChats();
+    renderChatList();
+    notifyNewMessage(chat.name, reply);
+  }, 1500);
+}
+
+document.getElementById('send-btn').addEventListener('click', ()=>{
+  if(isRecording){
+    stopAndSendRecording();
+    return;
+  }
+  const hasText = document.getElementById('msg-input').value.trim().length > 0;
+  if(hasText){
+    sendMessage();
+  }else{
+    startRecording();
+  }
+});
+document.getElementById('rec-cancel-btn').addEventListener('click', cancelRecording);
 document.getElementById('msg-input').addEventListener('keydown', (e)=>{
   if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); }
 });
 document.getElementById('msg-input').addEventListener('input', function(){
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 90) + 'px';
+  updateSendBtnIcon();
 });
+updateSendBtnIcon();
 
 document.getElementById('fab-new').addEventListener('click', ()=>{
   const name = (prompt("Yangi suhbat uchun ism kiriting:") || '').trim();
