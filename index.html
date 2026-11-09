@@ -286,6 +286,22 @@ if ('serviceWorker' in navigator) {
   .wp-tile span{ position:absolute; left:0; right:0; bottom:0; padding:16px 4px 6px; text-align:center; font-size:12px; font-weight:700; color:#fff; background:linear-gradient(transparent,rgba(0,0,0,.6)); }
   .wp-check{ position:absolute; top:6px; right:6px; width:22px; height:22px; border-radius:50%; background:var(--green-accent); display:none; align-items:center; justify-content:center; }
   .wp-tile.selected .wp-check{ display:flex; }
+  .nc-header-titles{ flex:1; min-width:0; }
+  .nc-sub{ font-size:12.5px; color:rgba(255,255,255,.8); margin-top:1px; }
+  .nc-search{ background:#fff; padding:8px 14px; border-bottom:1px solid var(--divider); flex-shrink:0; }
+  .nc-search input{ width:100%; border:none; outline:none; font-size:16px; background:#F0F2F5; border-radius:10px; padding:10px 12px; }
+  .nc-body{ flex:1; overflow-y:auto; background:#fff; padding-bottom:30px; }
+  .nc-section{ padding:16px 18px 6px; font-size:13.5px; color:var(--text-grey); font-weight:600; }
+  .nc-row{ display:flex; align-items:center; gap:16px; padding:9px 18px; }
+  .nc-row:active{ background:#F5F6F6; }
+  .nc-avatar{ width:50px; height:50px; border-radius:50%; object-fit:cover; flex-shrink:0; background:#e5e5e5; }
+  .nc-avatar.nc-black{ background:#111; display:flex; align-items:center; justify-content:center; }
+  .nc-avatar.nc-black svg{ width:24px; height:24px; color:#fff; }
+  .nc-name{ font-size:16.5px; color:var(--text-dark); font-weight:500; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .nc-note{ padding:12px 18px; font-size:13px; color:var(--text-grey); line-height:1.45; }
+  .found-card{ display:flex; align-items:center; gap:14px; background:#F0F2F5; border-radius:12px; padding:12px 14px; margin-top:18px; }
+  .found-add{ background:var(--teal); color:#fff; font-weight:700; font-size:13.5px; padding:9px 14px; border-radius:20px; flex-shrink:0; }
+  .sys-note{ align-self:center; max-width:88%; text-align:center; background:#FFF6D6; color:#5f5a3a; font-size:12.5px; line-height:1.4; padding:8px 12px; border-radius:10px; margin:0 0 10px; }
   .fontsize-option{
     display:flex; align-items:center; justify-content:space-between;
     padding:16px 4px; border-bottom:1px solid var(--divider);
@@ -1095,11 +1111,39 @@ if ('serviceWorker' in navigator) {
     </div>
   </div>
 
+  <div class="screen hidden-right" id="screen-new-chat">
+    <div class="detail-header">
+      <div class="icon-btn" id="newchat-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M15 18l-6-6 6-6"/></svg></div>
+      <div class="nc-header-titles"><div class="detail-title">Kontaktni tanlang</div><div class="nc-sub" id="nc-count"></div></div>
+      <div class="icon-btn" id="nc-search-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
+    </div>
+    <div class="nc-search" id="nc-search-wrap" style="display:none;"><input id="nc-search-input" type="text" placeholder="Ism bo'yicha qidirish"></div>
+    <div class="nc-body">
+      <div class="nc-row" id="nc-new-contact"><div class="nc-avatar nc-black"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 12c2.2 0 4-1.8 4-4s-1.8-4-4-4-4 1.8-4 4 1.8 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4z"/></svg></div><div class="nc-name">Yangi kontakt</div></div>
+      <div id="nc-list"></div>
+    </div>
+  </div>
+
+  <div class="screen hidden-right" id="screen-add-contact">
+    <div class="detail-header">
+      <div class="icon-btn" id="addcontact-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M15 18l-6-6 6-6"/></svg></div>
+      <div class="detail-title">Yangi kontakt</div>
+    </div>
+    <div class="detail-body">
+      <div class="field-label">Telefon raqami</div>
+      <input class="field-input" id="ac-phone" type="tel" inputmode="tel" placeholder="+998 90 123 45 67">
+      <div class="profile-save-btn" id="ac-search-btn">Qidirish</div>
+      <div id="ac-result"></div>
+      <div class="detail-desc" style="margin-top:24px;">Odam topilishi uchun u o'z raqamini <b>Sozlamalar → Akkaunt</b> bo'limida saqlagan bo'lishi kerak. Siz ham topilishingiz uchun o'z raqamingizni shu yerda saqlang. Raqam egaligi tekshirilmaydi: raqamni birinchi bo'lib saqlagan foydalanuvchiga biriktiriladi.</div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
   var firebaseConfig = {
     apiKey: "AIzaSyBBfQz4lRThvsKZhH_qfKsb5R9RMkm7Z_g",
@@ -1155,11 +1199,11 @@ function renderChatList(){
       <img class="avatar" src="${c.avatar}">
       <div class="chat-info">
         <div class="chat-row1">
-          <div class="chat-name">${c.name}</div>
+          <div class="chat-name">${escHtml(c.name)}</div>
           <div class="chat-time ${c.unread>0?'unread':''}">${c.time}</div>
         </div>
         <div class="chat-row2">
-          <div class="chat-msg">${c.last}</div>
+          <div class="chat-msg">${escHtml(c.last)}</div>
           ${c.unread>0 ? `<div class="badge">${c.unread}</div>` : ''}
         </div>
       </div>
@@ -1285,7 +1329,7 @@ function openChat(id){
   renderChatList();
   document.getElementById('detail-avatar').src = chat.avatar;
   document.getElementById('detail-name').textContent = chat.name;
-  document.getElementById('detail-status').textContent = chat.online ? 'onlayn' : "oxirgi marta bugun ko'rilgan";
+  document.getElementById('detail-status').textContent = chat.real ? 'M-CHAT foydalanuvchisi' : (chat.online ? 'onlayn' : "oxirgi marta bugun ko'rilgan");
   renderMessages(chat);
   applyChatWallpaper(id);
   goTo('screen-chat-detail');
@@ -1302,7 +1346,7 @@ function voiceWaveBars(seed){
 
 function renderMessages(chat){
   const wrap = document.getElementById('messages');
-  wrap.innerHTML = '<div class="day-chip">BUGUN</div>' + chat.messages.map((m,i) => {
+  wrap.innerHTML = '<div class="day-chip">BUGUN</div>' + (chat.real ? '<div class="sys-note">Xabarlarni boshqa foydalanuvchiga yetkazish hali ulanmagan. Hozircha xabarlar faqat shu telefonda saqlanadi.</div>' : '') + chat.messages.map((m,i) => {
     if(m.type === 'voice'){
       return `
     <div class="bubble-row ${m.from==='out'?'out':''}">
@@ -1321,7 +1365,7 @@ function renderMessages(chat){
     return `
     <div class="bubble-row ${m.from==='out'?'out':''}">
       <div class="bubble ${m.from}">
-        <span class="bubble-text">${m.text}</span>
+        <span class="bubble-text">${escHtml(m.text)}</span>
         <span class="bubble-meta">${m.time}${m.from==='out' ? (m.read ? ' <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12l5 5L18 6"/><path d="M9 12l5 5L28 3" transform="translate(-8)"/></svg>' : '') : ''}</span>
       </div>
     </div>
@@ -1354,7 +1398,7 @@ document.getElementById('messages').addEventListener('click', (e)=>{
 });
 
 function goTo(screenId){
-  const all = ['screen-chats','screen-status','screen-calls','screen-settings','screen-chat-detail','screen-profile-edit','screen-settings-detail','screen-wallpaper','screen-fontsize'];
+  const all = ['screen-chats','screen-status','screen-calls','screen-settings','screen-chat-detail','screen-profile-edit','screen-settings-detail','screen-wallpaper','screen-fontsize','screen-new-chat','screen-add-contact'];
   all.forEach(id=>{
     const el = document.getElementById(id);
     if(id === screenId) el.classList.remove('hidden-right');
@@ -1402,12 +1446,14 @@ function sendMessage(){
   renderChatList();
 
   setTimeout(()=>{
+    if(chat.real) return;
     chat.messages.forEach(m=>{ if(m.from==='out') m.read = true; });
     renderMessages(chat);
     saveChats();
   }, 700);
 
   setTimeout(()=>{
+    if(chat.real) return;
     const reply = foxReplies[Math.floor(Math.random()*foxReplies.length)];
     chat.messages.push({from:'in', text:reply, time:nowTime()});
     chat.last = reply;
@@ -1565,12 +1611,14 @@ function sendVoiceMessage(dataUrl, durationSec){
   renderChatList();
 
   setTimeout(()=>{
+    if(chat.real) return;
     chat.messages.forEach(mm=>{ if(mm.from==='out') mm.read = true; });
     renderMessages(chat);
     saveChats();
   }, 700);
 
   setTimeout(()=>{
+    if(chat.real) return;
     const reply = foxReplies[Math.floor(Math.random()*foxReplies.length)];
     chat.messages.push({from:'in', text:reply, time:nowTime()});
     chat.last = reply;
@@ -1605,19 +1653,7 @@ document.getElementById('msg-input').addEventListener('input', function(){
 });
 updateSendBtnIcon();
 
-document.getElementById('fab-new').addEventListener('click', ()=>{
-  const name = (prompt("Yangi suhbat uchun ism kiriting:") || '').trim();
-  if(!name) return;
-  const id = Date.now();
-  chats.unshift({
-    id, name, avatar: LOGO, last: "Suhbat boshlandi", time: nowTime(),
-    unread: 0, online: false,
-    messages: [{from:'in', text: "Salom! Bu yangi suhbat.", time: nowTime()}]
-  });
-  saveChats();
-  renderChatList();
-  showToast(name + " bilan suhbat yaratildi");
-});
+document.getElementById('fab-new').addEventListener('click', ()=> openNewChatScreen());
 
 document.getElementById('chat-search').addEventListener('input', function(){
   const q = this.value.trim().toLowerCase();
@@ -1776,6 +1812,8 @@ if(avatarImgEl && avatarFileInput){
       localStorage.setItem('mchat_photo', dataUrl);
       localStorage.setItem('mchat_custom_photo', '1');
       document.querySelectorAll('.settings-profile img, #profile-edit-avatar').forEach(img=> img.src = dataUrl);
+      localStorage.removeItem('mchat_photo_thumb');
+      syncMyProfile();
       showToast("Profil surati yangilandi");
     }catch(err){
       showToast("Rasmni saqlab bo'lmadi");
@@ -1860,6 +1898,9 @@ firebase.auth().onAuthStateChanged((user)=>{
       localStorage.setItem('mchat_photo', user.photoURL || '');
     }
     applyProfile();
+    syncMyProfile();
+    const ph = localStorage.getItem('mchat_phone');
+    if(ph && !localStorage.getItem('mchat_phone_norm')) syncMyPhone(ph);
   }
 });
 applyProfile();
@@ -1887,8 +1928,14 @@ document.getElementById('profile-edit-save').addEventListener('click', ()=>{
   }
   localStorage.setItem('mchat_phone', phone);
   applyProfile();
-  showToast("Profil saqlandi");
   goTo('screen-settings');
+  syncMyProfile();
+  syncMyPhone(phone).then(r=>{
+    if(r === 'ok') showToast("Profil saqlandi, raqamingiz bo'yicha topilasiz");
+    else if(r === 'denied') showToast("Profil saqlandi. Raqam boshqa foydalanuvchiga biriktirilgan yoki server sozlanmagan");
+    else if(r === 'error') showToast("Profil saqlandi. Raqamni serverga yuborib bo'lmadi");
+    else showToast("Profil saqlandi");
+  });
 });
 
 /* ================= SETTINGS DETAIL SCREENS ================= */
@@ -2214,6 +2261,211 @@ document.querySelectorAll('.fontsize-option').forEach(el=>{
   });
 });
 applyFontSize(localStorage.getItem('mchat_fontsize') || '14.5');
+
+/* ================= CONTACTS & PEOPLE SEARCH (phone number) ================= */
+function escHtml(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function safePhoto(p){
+  return (typeof p === 'string' && /^(https:\/\/|data:image\/)/.test(p)) ? p : LOGO;
+}
+function normPhone(s){
+  let d = String(s || '').replace(/\D/g, '');
+  if(d.length === 9) d = '998' + d;
+  return (d.length >= 10 && d.length <= 15) ? d : '';
+}
+function getDb(){
+  try{ return (window.firebase && firebase.firestore) ? firebase.firestore() : null; }catch(e){ return null; }
+}
+function myUid(){
+  try{ const u = firebase.auth().currentUser; return u ? u.uid : null; }catch(e){ return null; }
+}
+function thumbFromDataUrl(dataUrl, size){
+  return new Promise(resolve=>{
+    const im = new Image();
+    im.onload = ()=>{
+      const s = Math.min(1, size / Math.max(im.naturalWidth, im.naturalHeight));
+      const w = Math.max(1, Math.round(im.naturalWidth * s)), h = Math.max(1, Math.round(im.naturalHeight * s));
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(im, 0, 0, w, h);
+      resolve(cv.toDataURL('image/jpeg', 0.7));
+    };
+    im.onerror = ()=> resolve('');
+    im.src = dataUrl;
+  });
+}
+async function syncMyProfile(){
+  const db = getDb(), uid = myUid();
+  if(!db || !uid) return false;
+  try{
+    const user = firebase.auth().currentUser;
+    let photo = '';
+    if(localStorage.getItem('mchat_custom_photo') === '1'){
+      let t = localStorage.getItem('mchat_photo_thumb');
+      if(!t){
+        const full = localStorage.getItem('mchat_photo');
+        if(full){ t = await thumbFromDataUrl(full, 96); if(t) localStorage.setItem('mchat_photo_thumb', t); }
+      }
+      photo = t || '';
+    }else{
+      photo = user.photoURL || '';
+    }
+    if(photo.length > 30000) photo = '';
+    const name = (localStorage.getItem('mchat_name') || user.displayName || (localStorage.getItem('mchat_email') || '').split('@')[0] || 'Foydalanuvchi').slice(0, 60);
+    await db.collection('users').doc(uid).set({ uid: uid, name: name, photo: photo, updatedAt: Date.now() });
+    return true;
+  }catch(e){ return false; }
+}
+async function syncMyPhone(phoneRaw){
+  const db = getDb(), uid = myUid();
+  if(!db || !uid) return 'off';
+  const newNorm = normPhone(phoneRaw);
+  const oldNorm = localStorage.getItem('mchat_phone_norm') || '';
+  try{
+    if(oldNorm && oldNorm !== newNorm){
+      try{ await db.collection('phones').doc(oldNorm).delete(); }catch(e){}
+      localStorage.removeItem('mchat_phone_norm');
+    }
+    if(!newNorm) return 'cleared';
+    await db.collection('phones').doc(newNorm).set({ uid: uid });
+    localStorage.setItem('mchat_phone_norm', newNorm);
+    return 'ok';
+  }catch(e){
+    return (e && e.code === 'permission-denied') ? 'denied' : 'error';
+  }
+}
+
+let contacts = [];
+try{ contacts = JSON.parse(localStorage.getItem('mchat_contacts') || '[]'); }catch(e){ contacts = []; }
+function saveContacts(){ try{ localStorage.setItem('mchat_contacts', JSON.stringify(contacts)); }catch(e){} }
+function addContact(user){
+  if(!contacts.some(x => x.uid === user.uid)){
+    contacts.push({ uid: user.uid, name: user.name, photo: user.photo || '' });
+    saveContacts();
+  }
+}
+
+let dirUsers = [];
+let dirState = 'idle';
+async function loadDirectory(){
+  const db = getDb();
+  if(!db || !myUid()){ dirState = 'off'; renderNewChatList(); return; }
+  dirState = 'loading';
+  renderNewChatList();
+  try{
+    const snap = await db.collection('users').limit(100).get();
+    const list = [];
+    snap.forEach(d=>{
+      const u = d.data();
+      if(u && u.uid && u.uid !== myUid()) list.push({ uid: u.uid, name: String(u.name || 'Foydalanuvchi'), photo: u.photo || '' });
+    });
+    dirUsers = list;
+    dirState = 'ok';
+  }catch(e){
+    dirState = (e && e.code === 'permission-denied') ? 'denied' : 'error';
+  }
+  renderNewChatList();
+}
+
+function ncRow(kind, id, name, photo){
+  return '<div class="nc-row" data-kind="' + kind + '" data-id="' + escHtml(id) + '"><img class="nc-avatar" src="' + escHtml(safePhoto(photo)) + '" alt=""><div class="nc-name">' + escHtml(name) + '</div></div>';
+}
+function renderNewChatList(){
+  const el = document.getElementById('nc-list');
+  const q = (document.getElementById('nc-search-input').value || '').trim().toLowerCase();
+  const match = (name)=> !q || String(name).toLowerCase().indexOf(q) !== -1;
+  let html = '';
+  const recent = chats.filter(ch => match(ch.name)).slice(0, 3);
+  if(recent.length) html += '<div class="nc-section">Tez-tez muloqot qilasiz</div>' + recent.map(ch => ncRow('chat', String(ch.id), ch.name, ch.avatar)).join('');
+  const cs = contacts.filter(x => match(x.name));
+  if(cs.length) html += '<div class="nc-section">M-CHAT kontaktlari</div>' + cs.map(x => ncRow('contact', x.uid, x.name, x.photo)).join('');
+  const have = new Set(contacts.map(x => x.uid));
+  const ds = dirUsers.filter(u => !have.has(u.uid) && match(u.name));
+  if(ds.length) html += '<div class="nc-section">M-CHAT foydalanuvchilari</div>' + ds.map(u => ncRow('dir', u.uid, u.name, u.photo)).join('');
+  let note = '';
+  if(dirState === 'loading') note = "Foydalanuvchilar yuklanmoqda...";
+  else if(dirState === 'off') note = "Foydalanuvchilar ro'yxati uchun Google bilan kiring va internetga ulaning.";
+  else if(dirState === 'denied' || dirState === 'error') note = "Server hali sozlanmagan (Firestore). Sozlangandan keyin foydalanuvchilar shu yerda ko'rinadi.";
+  else if(dirState === 'ok' && !ds.length && !q) note = "Hozircha boshqa foydalanuvchi yo'q. Raqam orqali qidirish uchun «Yangi kontakt»ni bosing.";
+  el.innerHTML = html + (note ? '<div class="nc-note">' + note + '</div>' : '');
+  document.getElementById('nc-count').textContent = (contacts.length + dirUsers.length) + " ta kontakt";
+}
+
+function startChatWith(user){
+  let chat = chats.find(ch => ch.peerUid === user.uid);
+  if(!chat){
+    chat = { id: Date.now(), name: user.name, avatar: safePhoto(user.photo), peerUid: user.uid, real: true,
+             last: "Yangi kontakt", time: nowTime(), unread: 0, online: false, messages: [] };
+    chats.unshift(chat);
+    saveChats();
+    renderChatList();
+  }
+  openChat(chat.id);
+}
+
+function openNewChatScreen(){
+  document.getElementById('nc-search-wrap').style.display = 'none';
+  document.getElementById('nc-search-input').value = '';
+  renderNewChatList();
+  goTo('screen-new-chat');
+  loadDirectory();
+}
+document.getElementById('newchat-back').addEventListener('click', ()=> goTo('screen-chats'));
+document.getElementById('nc-search-btn').addEventListener('click', ()=>{
+  const w = document.getElementById('nc-search-wrap');
+  const show = w.style.display === 'none';
+  w.style.display = show ? 'block' : 'none';
+  if(show) document.getElementById('nc-search-input').focus();
+  else { document.getElementById('nc-search-input').value = ''; renderNewChatList(); }
+});
+document.getElementById('nc-search-input').addEventListener('input', renderNewChatList);
+document.getElementById('nc-list').addEventListener('click', (e)=>{
+  const row = e.target.closest('.nc-row');
+  if(!row) return;
+  const kind = row.dataset.kind, id = row.dataset.id;
+  if(kind === 'chat'){ openChat(Number(id)); return; }
+  const user = (kind === 'contact' ? contacts : dirUsers).find(x => x.uid === id);
+  if(user) startChatWith(user);
+});
+document.getElementById('nc-new-contact').addEventListener('click', ()=>{
+  document.getElementById('ac-phone').value = '';
+  document.getElementById('ac-result').innerHTML = '';
+  goTo('screen-add-contact');
+});
+document.getElementById('addcontact-back').addEventListener('click', ()=> goTo('screen-new-chat'));
+
+let foundUser = null;
+function acNote(text){ document.getElementById('ac-result').innerHTML = '<div class="nc-note" style="padding-left:2px;">' + text + '</div>'; }
+async function searchByPhone(){
+  const norm = normPhone(document.getElementById('ac-phone').value);
+  if(!norm){ acNote("Raqamni to'liq kiriting, masalan +998 90 123 45 67"); return; }
+  const db = getDb();
+  if(!db || !myUid()){ acNote("Qidirish uchun Google bilan kirgan va internetga ulangan bo'lishingiz kerak."); return; }
+  acNote("Qidirilmoqda...");
+  try{
+    const ph = await db.collection('phones').doc(norm).get();
+    if(!ph.exists){ acNote("Bu raqam M-CHAT'da topilmadi. Do'stingiz raqamini Sozlamalar → Akkaunt bo'limida saqlagan bo'lishi kerak."); return; }
+    const uid = ph.data().uid;
+    if(uid === myUid()){ acNote("Bu sizning raqamingiz."); return; }
+    const us = await db.collection('users').doc(uid).get();
+    if(!us.exists){ acNote("Foydalanuvchi profili topilmadi."); return; }
+    const u = us.data();
+    foundUser = { uid: uid, name: String(u.name || 'Foydalanuvchi'), photo: u.photo || '' };
+    document.getElementById('ac-result').innerHTML =
+      '<div class="found-card"><img class="nc-avatar" src="' + escHtml(safePhoto(foundUser.photo)) + '" alt=""><div class="nc-name">' + escHtml(foundUser.name) + '</div><div class="found-add" id="ac-add-btn">Qo\'shish</div></div>';
+  }catch(e){
+    acNote((e && e.code === 'permission-denied') ? "Server hali sozlanmagan (Firestore qoidalari)." : "Qidirishda xatolik. Internetni tekshiring.");
+  }
+}
+document.getElementById('ac-search-btn').addEventListener('click', searchByPhone);
+document.getElementById('ac-phone').addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); searchByPhone(); } });
+document.getElementById('ac-result').addEventListener('click', (e)=>{
+  if(e.target.closest('#ac-add-btn') && foundUser){
+    addContact(foundUser);
+    showToast(foundUser.name + " kontaktlarga qo'shildi");
+    startChatWith(foundUser);
+  }
+});
 
 </script>
 </body>
