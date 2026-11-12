@@ -302,6 +302,8 @@ if ('serviceWorker' in navigator) {
   .found-card{ display:flex; align-items:center; gap:14px; background:#F0F2F5; border-radius:12px; padding:12px 14px; margin-top:18px; }
   .found-add{ background:var(--teal); color:#fff; font-weight:700; font-size:13.5px; padding:9px 14px; border-radius:20px; flex-shrink:0; }
   .sys-note{ align-self:center; max-width:88%; text-align:center; background:#FFF6D6; color:#5f5a3a; font-size:12.5px; line-height:1.4; padding:8px 12px; border-radius:10px; margin:0 0 10px; }
+  .nc-banner{ margin:10px 14px 2px; background:#FFF6D6; color:#5f5a3a; border-radius:12px; padding:12px 14px; font-size:13.5px; line-height:1.45; }
+  .nc-banner b{ display:block; margin-top:6px; color:var(--teal); }
   .fontsize-option{
     display:flex; align-items:center; justify-content:space-between;
     padding:16px 4px; border-bottom:1px solid var(--divider);
@@ -1134,10 +1136,20 @@ if ('serviceWorker' in navigator) {
       <input class="field-input" id="ac-phone" type="tel" inputmode="tel" placeholder="+998 90 123 45 67">
       <div class="profile-save-btn" id="ac-search-btn">Qidirish</div>
       <div id="ac-result"></div>
+      <div class="detail-btn" id="ac-diag-btn" style="margin-top:18px;">Server holatini tekshirish</div>
       <div class="detail-desc" style="margin-top:24px;">Odam topilishi uchun u o'z raqamini <b>Sozlamalar → Akkaunt</b> bo'limida saqlagan bo'lishi kerak. Siz ham topilishingiz uchun o'z raqamingizni shu yerda saqlang. Raqam egaligi tekshirilmaydi: raqamni birinchi bo'lib saqlagan foydalanuvchiga biriktiriladi.</div>
     </div>
   </div>
 
+  <div class="modal-overlay" id="phone-prompt" style="display:none;">
+    <div class="account-modal" style="padding:22px 20px 6px;">
+      <div class="account-modal-title" style="text-align:center;">Telefon raqamingiz</div>
+      <div class="account-modal-sub" style="text-align:center;margin-bottom:8px;">Do'stlaringiz sizni shu raqam orqali topishi uchun kiriting</div>
+      <input class="field-input" id="pp-phone" type="tel" inputmode="tel" placeholder="+998 90 123 45 67" style="margin:14px 0 16px;">
+      <div class="profile-save-btn" id="pp-save">Saqlash</div>
+      <div class="modal-cancel" id="pp-later" style="border-top:none;">Keyinroq</div>
+    </div>
+  </div>
   <div class="toast" id="toast"></div>
 </div>
 
@@ -1901,6 +1913,7 @@ firebase.auth().onAuthStateChanged((user)=>{
     syncMyProfile();
     const ph = localStorage.getItem('mchat_phone');
     if(ph && !localStorage.getItem('mchat_phone_norm')) syncMyPhone(ph);
+    setTimeout(maybePromptPhone, 1200);
   }
 });
 applyProfile();
@@ -2271,8 +2284,25 @@ function safePhoto(p){
 }
 function normPhone(s){
   let d = String(s || '').replace(/\D/g, '');
+  if(d.indexOf('00') === 0) d = d.slice(2);
+  if(d.length === 10 && d.charAt(0) === '0') d = d.slice(1);
   if(d.length === 9) d = '998' + d;
   return (d.length >= 10 && d.length <= 15) ? d : '';
+}
+function phoneCandidates(s){
+  const raw = String(s || '').replace(/\D/g, '');
+  const out = [];
+  const n = normPhone(s);
+  if(n) out.push(n);
+  if(raw.length >= 10 && raw.length <= 15 && out.indexOf(raw) === -1) out.push(raw);
+  return out;
+}
+var lastDbError = '';
+function dbErrorHelp(code){
+  if(code === 'permission-denied') return "Firestore qoidalari (Rules) nashr qilinmagan yoki noto'g'ri. Firebase → Firestore Database → «Правила» ga firestore-rules.txt matnini qo'yib «Опубликовать» bosing.";
+  if(code === 'unavailable' || code === 'deadline-exceeded') return "Firestore'ga ulanib bo'lmadi: internet yo'q yoki baza hali yaratilmagan («Создать базу данных»).";
+  if(code === 'not-found' || code === 'failed-precondition') return "Firestore bazasi yaratilmagan. Firebase → Firestore Database → «Создать базу данных».";
+  return "Server xatosi" + (code ? " (" + code + ")" : "") + ". Internetni tekshirib, qayta urinib ko'ring.";
 }
 function getDb(){
   try{ return (window.firebase && firebase.firestore) ? firebase.firestore() : null; }catch(e){ return null; }
@@ -2313,8 +2343,9 @@ async function syncMyProfile(){
     if(photo.length > 30000) photo = '';
     const name = (localStorage.getItem('mchat_name') || user.displayName || (localStorage.getItem('mchat_email') || '').split('@')[0] || 'Foydalanuvchi').slice(0, 60);
     await db.collection('users').doc(uid).set({ uid: uid, name: name, photo: photo, updatedAt: Date.now() });
+    lastDbError = '';
     return true;
-  }catch(e){ return false; }
+  }catch(e){ lastDbError = (e && e.code) || String(e); return false; }
 }
 async function syncMyPhone(phoneRaw){
   const db = getDb(), uid = myUid();
@@ -2331,6 +2362,7 @@ async function syncMyPhone(phoneRaw){
     localStorage.setItem('mchat_phone_norm', newNorm);
     return 'ok';
   }catch(e){
+    lastDbError = (e && e.code) || String(e);
     return (e && e.code === 'permission-denied') ? 'denied' : 'error';
   }
 }
@@ -2374,7 +2406,8 @@ function renderNewChatList(){
   const el = document.getElementById('nc-list');
   const q = (document.getElementById('nc-search-input').value || '').trim().toLowerCase();
   const match = (name)=> !q || String(name).toLowerCase().indexOf(q) !== -1;
-  let html = '';
+  let html = localStorage.getItem('mchat_phone_norm') ? '' :
+    '<div class="nc-banner">Sizning raqamingiz serverda yo\'q, shuning uchun boshqalar sizni topa olmaydi.<b>Raqamni kiritish</b></div>';
   const recent = chats.filter(ch => match(ch.name)).slice(0, 3);
   if(recent.length) html += '<div class="nc-section">Tez-tez muloqot qilasiz</div>' + recent.map(ch => ncRow('chat', String(ch.id), ch.name, ch.avatar)).join('');
   const cs = contacts.filter(x => match(x.name));
@@ -2420,6 +2453,11 @@ document.getElementById('nc-search-btn').addEventListener('click', ()=>{
 });
 document.getElementById('nc-search-input').addEventListener('input', renderNewChatList);
 document.getElementById('nc-list').addEventListener('click', (e)=>{
+  if(e.target.closest('.nc-banner')){
+    document.getElementById('settings-profile-row').click();
+    setTimeout(()=> document.getElementById('profile-edit-phone').focus(), 400);
+    return;
+  }
   const row = e.target.closest('.nc-row');
   if(!row) return;
   const kind = row.dataset.kind, id = row.dataset.id;
@@ -2437,15 +2475,18 @@ document.getElementById('addcontact-back').addEventListener('click', ()=> goTo('
 let foundUser = null;
 function acNote(text){ document.getElementById('ac-result').innerHTML = '<div class="nc-note" style="padding-left:2px;">' + text + '</div>'; }
 async function searchByPhone(){
-  const norm = normPhone(document.getElementById('ac-phone').value);
-  if(!norm){ acNote("Raqamni to'liq kiriting, masalan +998 90 123 45 67"); return; }
+  const cands = phoneCandidates(document.getElementById('ac-phone').value);
+  if(!cands.length){ acNote("Raqamni to'liq kiriting, masalan +998 90 123 45 67"); return; }
   const db = getDb();
-  if(!db || !myUid()){ acNote("Qidirish uchun Google bilan kirgan va internetga ulangan bo'lishingiz kerak."); return; }
+  if(!db || !myUid()){ acNote("Qidirish uchun Google bilan kirgan va internetga ulangan bo'lishingiz kerak. Pastdagi «Server holatini tekshirish» ni bosing."); return; }
   acNote("Qidirilmoqda...");
   try{
-    const ph = await db.collection('phones').doc(norm).get();
-    if(!ph.exists){ acNote("Bu raqam M-CHAT'da topilmadi. Do'stingiz raqamini Sozlamalar → Akkaunt bo'limida saqlagan bo'lishi kerak."); return; }
-    const uid = ph.data().uid;
+    let uid = null;
+    for(const key of cands){
+      const ph = await db.collection('phones').doc(key).get();
+      if(ph.exists){ uid = ph.data().uid; break; }
+    }
+    if(!uid){ acNote("Bu raqam M-CHAT'da topilmadi. Odatda sabab: do'stingiz raqamini hali kiritmagan. U ilovani oxirgi versiyaga yangilab, Sozlamalar → Akkaunt bo'limida raqamini «Saqlash» bosishi kerak. Pastdagi «Server holatini tekshirish» ham yordam beradi."); return; }
     if(uid === myUid()){ acNote("Bu sizning raqamingiz."); return; }
     const us = await db.collection('users').doc(uid).get();
     if(!us.exists){ acNote("Foydalanuvchi profili topilmadi."); return; }
@@ -2454,9 +2495,62 @@ async function searchByPhone(){
     document.getElementById('ac-result').innerHTML =
       '<div class="found-card"><img class="nc-avatar" src="' + escHtml(safePhoto(foundUser.photo)) + '" alt=""><div class="nc-name">' + escHtml(foundUser.name) + '</div><div class="found-add" id="ac-add-btn">Qo\'shish</div></div>';
   }catch(e){
-    acNote((e && e.code === 'permission-denied') ? "Server hali sozlanmagan (Firestore qoidalari)." : "Qidirishda xatolik. Internetni tekshiring.");
+    acNote(dbErrorHelp(e && e.code));
   }
 }
+
+async function runDiagnostics(){
+  const lines = [];
+  const ok = t => lines.push('✅ ' + t), bad = t => lines.push('❌ ' + t);
+  document.getElementById('ac-result').innerHTML = '<div class="nc-note" style="padding-left:2px;">Tekshirilmoqda...</div>';
+  const uid = myUid(), db = getDb();
+  if(uid) ok("Google bilan kirilgan"); else bad("Google bilan kirilmagan. Sozlamalar → Chiqish, so'ng qayta kiring.");
+  if(db) ok("Firestore moduli yuklangan"); else bad("Firestore moduli yuklanmadi. Ilovani to'liq yopib qayta oching (yangi versiya yuklanishi kerak).");
+  if(db && uid){
+    const wrote = await syncMyProfile();
+    if(wrote) ok("Serverga yozish ishlayapti"); else bad(dbErrorHelp(lastDbError));
+    if(wrote){
+      const phone = localStorage.getItem('mchat_phone') || '';
+      if(!normPhone(phone)) bad("Raqamingiz kiritilmagan. Sozlamalar → Akkaunt bo'limida raqamni yozib «Saqlash» bosing.");
+      else{
+        const r = await syncMyPhone(phone);
+        if(r === 'ok') ok("Raqamingiz serverda saqlangan: " + normPhone(phone));
+        else if(r === 'denied') bad("Raqam saqlanmadi: u boshqa foydalanuvchiga biriktirilgan.");
+        else bad(dbErrorHelp(lastDbError));
+      }
+      try{
+        const snap = await db.collection('users').limit(100).get();
+        let n = 0; snap.forEach(()=>{ n++; });
+        ok("Serverda " + n + " ta foydalanuvchi bor" + (n < 2 ? " (faqat siz). Do'stingiz ham Google bilan kirib, ilovani yangilashi kerak." : ""));
+      }catch(e){ bad(dbErrorHelp(e && e.code)); }
+    }
+  }
+  document.getElementById('ac-result').innerHTML = '<div class="nc-note" style="line-height:1.8;padding-left:2px;">' + lines.map(escHtml).join('<br>') + '</div>';
+}
+document.getElementById('ac-diag-btn').addEventListener('click', runDiagnostics);
+
+function maybePromptPhone(){
+  if(!myUid()) return;
+  if(localStorage.getItem('mchat_authed') !== '1') return;
+  if(localStorage.getItem('mchat_phone') || localStorage.getItem('mchat_phone_prompted') === '1') return;
+  const el = document.getElementById('phone-prompt');
+  if(el.style.display === 'flex') return;
+  localStorage.setItem('mchat_phone_prompted', '1');
+  el.style.display = 'flex';
+}
+document.getElementById('pp-save').addEventListener('click', ()=>{
+  const phone = document.getElementById('pp-phone').value.trim();
+  if(!normPhone(phone)){ showToast("Raqamni to'liq kiriting: +998 90 123 45 67"); return; }
+  localStorage.setItem('mchat_phone', phone);
+  document.getElementById('phone-prompt').style.display = 'none';
+  syncMyProfile();
+  syncMyPhone(phone).then(r=>{
+    showToast(r === 'ok' ? "Raqamingiz saqlandi, endi sizni topishlari mumkin"
+      : (r === 'denied' ? "Raqam band yoki server qoidalari sozlanmagan"
+      : "Raqamni serverga yuborib bo'lmadi. «Yangi kontakt» → «Server holatini tekshirish»"));
+  });
+});
+document.getElementById('pp-later').addEventListener('click', ()=>{ document.getElementById('phone-prompt').style.display = 'none'; });
 document.getElementById('ac-search-btn').addEventListener('click', searchByPhone);
 document.getElementById('ac-phone').addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); searchByPhone(); } });
 document.getElementById('ac-result').addEventListener('click', (e)=>{
