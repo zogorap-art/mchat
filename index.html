@@ -2430,6 +2430,9 @@ if(logoutRow){
     try{ stopRealtime(); }catch(e){}
     localStorage.removeItem('mchat_chats');
     localStorage.removeItem('mchat_calllog');
+    localStorage.removeItem('mchat_phone_matches');
+    localStorage.removeItem('mchat_scanned_nums');
+    localStorage.removeItem('mchat_last_contact_check');
     if(window.firebase && firebase.auth) firebase.auth().signOut();
     location.reload();
   });
@@ -2685,27 +2688,91 @@ function addContact(user){
   }
 }
 
+// Telefon kontaktlari orasidagi M-CHAT foydalanuvchilari (faqat shu telefon kitobidagilar)
 let dirUsers = [];
+try{ dirUsers = JSON.parse(localStorage.getItem('mchat_phone_matches') || '[]'); }catch(e){ dirUsers = []; }
+if(!Array.isArray(dirUsers)) dirUsers = [];
+let scannedNums = [];
+try{ scannedNums = JSON.parse(localStorage.getItem('mchat_scanned_nums') || '[]'); }catch(e){ scannedNums = []; }
+if(!Array.isArray(scannedNums)) scannedNums = [];
 let dirState = 'idle';
-async function loadDirectory(){
-  const db = getDb();
-  if(!db || !myUid()){ dirState = 'off'; renderNewChatList(); return; }
-  dirState = 'loading';
-  renderNewChatList();
+function savePhoneMatches(){
   try{
-    const snap = await db.collection('users').limit(100).get();
-    const list = [];
-    snap.forEach(d=>{
-      const u = d.data();
-      if(u && u.uid && u.uid !== myUid()) list.push({ uid: u.uid, name: String(u.name || 'Foydalanuvchi'), photo: u.photo || '' });
-    });
-    dirUsers = list;
-    dirState = 'ok';
-  }catch(e){
-    dirState = (e && e.code === 'permission-denied') ? 'denied' : 'error';
-  }
-  renderNewChatList();
+    localStorage.setItem('mchat_phone_matches', JSON.stringify(dirUsers));
+    localStorage.setItem('mchat_scanned_nums', JSON.stringify(scannedNums));
+  }catch(e){}
 }
+
+// list: [{n:'998901234567', name:'Ali'}] -> serverdagi 'phones' bilan solishtiradi, yangi topilganlar sonini qaytaradi
+async function lookupNumbers(list){
+  const db = getDb(), me = myUid();
+  if(!db || !me) return -1;
+  let found = 0;
+  const queue = list.slice();
+  const worker = async ()=>{
+    while(queue.length){
+      const it = queue.shift();
+      try{
+        const ph = await db.collection('phones').doc(it.n).get();
+        if(!ph.exists) continue;
+        const uid = ph.data().uid;
+        if(!uid || uid === me) continue;
+        if(dirUsers.some(x => x.uid === uid)) continue;
+        const us = await db.collection('users').doc(uid).get();
+        const u = us.exists ? us.data() : {};
+        dirUsers.push({ uid: uid, n: it.n, name: String(it.name || u.name || 'Foydalanuvchi').slice(0, 60), photo: u.photo || '' });
+        found++;
+      }catch(e){
+        if(e && e.code === 'permission-denied') dirState = 'denied';
+      }
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+  return found;
+}
+
+async function scanPhoneContacts(){
+  if(!navigator.contacts || !navigator.contacts.select){
+    dirState = 'unsupported'; renderNewChatList(); return;
+  }
+  if(!getDb() || !myUid()){ showToast("Avval Google bilan kiring va internetga ulaning"); return; }
+  let picked;
+  try{
+    picked = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+  }catch(e){ return; }
+  if(!picked || !picked.length) return;
+  const map = new Map();
+  picked.forEach(c=>{
+    const nm = (c.name && c.name[0]) ? String(c.name[0]) : '';
+    (c.tel || []).forEach(t=>{ const n = normPhone(t); if(n && !map.has(n)) map.set(n, nm); });
+  });
+  const mine = localStorage.getItem('mchat_phone_norm');
+  if(mine) map.delete(mine);
+  const list = Array.from(map, ([n, name]) => ({ n: n, name: name })).slice(0, 1000);
+  scannedNums = list;
+  dirState = 'scanning';
+  renderNewChatList();
+  const found = await lookupNumbers(list);
+  if(dirState !== 'denied') dirState = 'ok';
+  localStorage.setItem('mchat_last_contact_check', String(Date.now()));
+  savePhoneMatches();
+  renderNewChatList();
+  if(found >= 0) showToast(found > 0 ? (found + " ta M-CHAT foydalanuvchisi topildi") : "Kontaktlaringiz orasida hali M-CHAT foydalanuvchisi yo'q");
+}
+
+// Ilgari tekshirilgan raqamlardan yangi ro'yxatdan o'tganlarni jimgina qayta qidiradi (30 daqiqada 1 marta)
+async function recheckContacts(){
+  if(!scannedNums.length || !getDb() || !myUid()) return;
+  const last = Number(localStorage.getItem('mchat_last_contact_check') || 0);
+  if(Date.now() - last < 30 * 60 * 1000) return;
+  localStorage.setItem('mchat_last_contact_check', String(Date.now()));
+  const have = new Set(dirUsers.map(u => u.n));
+  const todo = scannedNums.filter(x => !have.has(x.n)).slice(0, 300);
+  if(!todo.length) return;
+  const found = await lookupNumbers(todo);
+  if(found > 0){ savePhoneMatches(); renderNewChatList(); }
+}
+
 
 function ncRow(kind, id, name, photo){
   return '<div class="nc-row" data-kind="' + kind + '" data-id="' + escHtml(id) + '"><img class="nc-avatar" src="' + escHtml(safePhoto(photo)) + '" alt=""><div class="nc-name">' + escHtml(name) + '</div></div>';
@@ -2716,6 +2783,7 @@ function renderNewChatList(){
   const match = (name)=> !q || String(name).toLowerCase().indexOf(q) !== -1;
   let html = localStorage.getItem('mchat_phone_norm') ? '' :
     '<div class="nc-banner">Sizning raqamingiz serverda yo\'q, shuning uchun boshqalar sizni topa olmaydi.<b>Raqamni kiritish</b></div>';
+  html += '<div class="nc-scan" style="margin:10px 16px;padding:12px 14px;border-radius:12px;background:#E7F6EF;color:#075E54;font-size:14px;line-height:1.4;"><b>Telefon kontaktlarini tekshirish</b><br><span style="font-size:13px;">Kontaktlaringiz orasidan M-CHAT ishlatadiganlarni topadi. Ochilgan oynada hammasini belgilang.</span></div>';
   const recent = chats.filter(ch => match(ch.name)).slice(0, 3);
   if(recent.length) html += '<div class="nc-section">Tez-tez muloqot qilasiz</div>' + recent.map(ch => ncRow('chat', String(ch.id), ch.name, ch.avatar)).join('');
   const cs = contacts.filter(x => match(x.name));
@@ -2724,10 +2792,11 @@ function renderNewChatList(){
   const ds = dirUsers.filter(u => !have.has(u.uid) && match(u.name));
   if(ds.length) html += '<div class="nc-section">M-CHAT foydalanuvchilari</div>' + ds.map(u => ncRow('dir', u.uid, u.name, u.photo)).join('');
   let note = '';
-  if(dirState === 'loading') note = "Foydalanuvchilar yuklanmoqda...";
-  else if(dirState === 'off') note = "Foydalanuvchilar ro'yxati uchun Google bilan kiring va internetga ulaning.";
-  else if(dirState === 'denied' || dirState === 'error') note = "Server hali sozlanmagan (Firestore). Sozlangandan keyin foydalanuvchilar shu yerda ko'rinadi.";
-  else if(dirState === 'ok' && !ds.length && !q) note = "Hozircha boshqa foydalanuvchi yo'q. Raqam orqali qidirish uchun «Yangi kontakt»ni bosing.";
+  if(dirState === 'scanning') note = "Kontaktlar tekshirilmoqda...";
+  else if(dirState === 'unsupported') note = "Bu brauzer telefon kontaktlarini o'qishni qo'llamaydi. Android'da Chrome orqali oching yoki «Yangi kontakt» orqali raqam bilan qidiring.";
+  else if(dirState === 'denied' || dirState === 'error') note = "Server qoidalari (Firestore Rules) yangilanmagan yoki xato bor.";
+  else if(!ds.length && !q && !scannedNums.length) note = "Hali kontaktlar tekshirilmagan. Yuqoridagi tugmani bosing.";
+  else if(!ds.length && !q) note = "Kontaktlaringiz orasida hali M-CHAT foydalanuvchisi topilmadi.";
   el.innerHTML = html + (note ? '<div class="nc-note">' + note + '</div>' : '');
   document.getElementById('nc-count').textContent = (contacts.length + dirUsers.length) + " ta kontakt";
 }
@@ -2749,7 +2818,7 @@ function openNewChatScreen(){
   document.getElementById('nc-search-input').value = '';
   renderNewChatList();
   goTo('screen-new-chat');
-  loadDirectory();
+  recheckContacts();
 }
 document.getElementById('newchat-back').addEventListener('click', ()=> goTo('screen-chats'));
 document.getElementById('nc-search-btn').addEventListener('click', ()=>{
@@ -2761,6 +2830,7 @@ document.getElementById('nc-search-btn').addEventListener('click', ()=>{
 });
 document.getElementById('nc-search-input').addEventListener('input', renderNewChatList);
 document.getElementById('nc-list').addEventListener('click', (e)=>{
+  if(e.target.closest('.nc-scan')){ scanPhoneContacts(); return; }
   if(e.target.closest('.nc-banner')){
     document.getElementById('settings-profile-row').click();
     setTimeout(()=> document.getElementById('profile-edit-phone').focus(), 400);
