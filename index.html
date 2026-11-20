@@ -1222,7 +1222,7 @@ function saveChats(){
 
 function renderChatList(){
   const list = document.getElementById('chat-list');
-  list.innerHTML = (chats.length ? '' : '<div class="nc-note" style="padding:28px 24px;text-align:center;">Hozircha suhbat yo\'q. Pastdagi yangi suhbat tugmasi orqali do\'stingizni telefon raqami bilan toping.</div>') + chats.slice().sort((a,b)=>(b.ts||0)-(a.ts||0)).map(c => `
+  list.innerHTML = pushBannerHtml() + (chats.length ? '' : '<div class="nc-note" style="padding:28px 24px;text-align:center;">Hozircha suhbat yo\'q. Pastdagi yangi suhbat tugmasi orqali do\'stingizni telefon raqami bilan toping.</div>') + chats.slice().sort((a,b)=>(b.ts||0)-(a.ts||0)).map(c => `
     <div class="chat-item" data-id="${c.id}">
       <img class="avatar" src="${c.avatar}">
       <div class="chat-info">
@@ -1692,6 +1692,10 @@ async function loadTurnConfig(){
     turnLoaded = true;
     if(!sn.exists) return;
     const d = sn.data() || {};
+    if(typeof d.pushUrl === 'string' && /^https:\/\//i.test(d.pushUrl)){
+      pushWorkerUrl = d.pushUrl.trim();
+      try{ localStorage.setItem('mchat_push_url', pushWorkerUrl); }catch(e){}
+    }
     // 0-usul: Turnix.io (token Firebase'da saqlanadi, GitHub'da emas)
     if(typeof d.turnixToken === 'string' && d.turnixToken.length > 8){
       try{
@@ -1875,7 +1879,8 @@ function createPeer(){
     if(!stream) return;
     const a = cEl('call-remote-audio');
     if(a.srcObject !== stream) a.srcObject = stream;
-    a.volume = callSpeakerOn ? 1 : 0.4;
+    a.volume = 1;
+    a.muted = !callSpeakerOn;
     const pl = a.play();
     if(pl && pl.catch) pl.catch(()=>{
       showToast("Ovoz chiqmasa, ekranga bir marta bosing");
@@ -1902,25 +1907,52 @@ function createPeer(){
 }
 
 let statsTimer = null;
+let micPeak = 0, spkPeak = 0, micFixTried = false;
+
+async function fixMic(){
+  try{
+    const ns = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const nt = ns.getAudioTracks()[0];
+    const sender = pc && pc.getSenders().find(x => x.track && x.track.kind === 'audio');
+    if(!sender){ nt.stop(); return; }
+    await sender.replaceTrack(nt);
+    if(callStream){
+      callStream.getAudioTracks().forEach(t=>{ t.stop(); callStream.removeTrack(t); });
+      callStream.addTrack(nt);
+    }
+    nt.enabled = callMicOn;
+    micPeak = 0;
+    showToast("Mikrofon qayta ulandi. Gapirib ko'ring");
+  }catch(e){}
+}
+
 function startCallStats(){
   clearInterval(statsTimer);
+  micPeak = 0; spkPeak = 0; micFixTried = false;
   statsTimer = setInterval(async ()=>{
     if(!pc || !callState || !callState.connected) return;
     try{
       const rep = await pc.getStats();
-      let sent = 0, recv = 0, mic = 0, spk = 0;
+      let sent = 0, recv = 0;
       rep.forEach(r=>{
         if(r.type === 'outbound-rtp' && r.kind === 'audio') sent += r.bytesSent || 0;
         if(r.type === 'inbound-rtp' && r.kind === 'audio'){
           recv += r.bytesReceived || 0;
-          if(typeof r.audioLevel === 'number') spk = Math.max(spk, r.audioLevel);
+          if(typeof r.audioLevel === 'number') spkPeak = Math.max(spkPeak, r.audioLevel);
         }
-        if(r.type === 'media-source' && r.kind === 'audio' && typeof r.audioLevel === 'number') mic = Math.max(mic, r.audioLevel);
+        if(r.type === 'media-source' && r.kind === 'audio' && typeof r.audioLevel === 'number') micPeak = Math.max(micPeak, r.audioLevel);
       });
       const a = cEl('call-remote-audio');
       if(a.srcObject && a.paused) a.play().catch(()=>{});
-      cEl('call-debug').textContent = '↑' + Math.round(sent/1024) + 'kB ↓' + Math.round(recv/1024) + 'kB · mik ' + mic.toFixed(2) +
-        ' · karnay ' + spk.toFixed(2) + ' · ' + (a.paused ? 'audio PAUSED' : 'audio ok') + ' · vol ' + a.volume;
+      const at = callStream && callStream.getAudioTracks()[0];
+      const lab = at ? ((at.label || '?').slice(0, 24) + (at.enabled ? '' : ' OFF') + (at.muted ? ' MUTED' : '')) : "mikrofon yo'q";
+      cEl('call-debug').textContent = '↑' + Math.round(sent/1024) + 'kB ↓' + Math.round(recv/1024) + 'kB · mik(max) ' + micPeak.toFixed(2) +
+        ' · karnay(max) ' + spkPeak.toFixed(2) + ' · ' + (a.paused ? 'audio PAUSED' : 'audio ok') + ' · ' + lab;
+      // 8 soniya ichida mikrofonda hech qanday ovoz sezilmasa, mikrofonni soddaroq sozlama bilan qayta ulaymiz
+      if(!micFixTried && callState.connectedAt && Date.now() - callState.connectedAt > 8000 && micPeak < 0.005){
+        micFixTried = true;
+        fixMic();
+      }
     }catch(e){}
   }, 1500);
 }
@@ -1968,6 +2000,7 @@ function watchCandidates(ref, uid){
 function onCallConnected(){
   if(!callState || callState.connected) return;
   callState.connected = true;
+  callState.connectedAt = Date.now();
   if(stopRing){ stopRing(); stopRing = null; }
   clearTimeout(ringTimeoutId);
   clearTimeout(connectTimeoutId); connectTimeoutId = null;
@@ -2018,14 +2051,15 @@ function scheduleCallCleanup(ref){
   }, 6000);
 }
 
-async function endCall(notifyPeer, msg, newStatus){
+async function endCall(tellPeer, msg, newStatus){
   if(callEnding || !callState) return;
   callEnding = true;
   const st = callState;
-  if(notifyPeer && st.ref){
+  if(tellPeer && st.ref){
     try{ await st.ref.update({ status: newStatus || 'ended' }); }catch(e){}
   }
   const connected = !!st.connected;
+  if(tellPeer && st.role === 'caller' && !connected) notifyPeer(st.peerUid, 'callend', '');
   addCallLog({
     peerUid: st.peerUid, name: st.peerName, avatar: st.peerAvatar, video: !!st.video, ts: Date.now(),
     type: st.role === 'caller' ? 'out' : 'in',
@@ -2080,6 +2114,7 @@ async function startOutgoingCall(peer, isVideo){
     });
     docReady = true;
     iceQueue.forEach(pushIce);
+    notifyPeer(peer.peerUid, 'call', isVideo ? 'video' : 'audio');
     if(callState !== st) return;   // foydalanuvchi bu orada bekor qildi
     stopRing = startRingtone(false);
     callUnsubs.push(ref.onSnapshot(snap=>{
@@ -2226,9 +2261,10 @@ cEl('call-cam-btn').addEventListener('click', ()=>{
 
 cEl('call-speaker-btn').addEventListener('click', ()=>{
   callSpeakerOn = !callSpeakerOn;
-  cEl('call-remote-audio').volume = callSpeakerOn ? 1 : 0.4;
+  cEl('call-remote-audio').volume = 1;
+  cEl('call-remote-audio').muted = !callSpeakerOn;
   updateCallButtons();
-  showToast(callSpeakerOn ? "Karnay yoqildi" : "Ovoz pasaytirildi");
+  showToast(callSpeakerOn ? "Suhbatdosh ovozi yoqildi" : "Suhbatdosh ovozi o'chirildi");
 });
 
 cEl('call-flip-btn').addEventListener('click', async ()=>{
@@ -2466,7 +2502,7 @@ function renderNotificationsDetail(){
     <div class="detail-toggle-row"><span>Push bildirishnomalar</span><div class="toggle-switch ${push?'on':''}" id="toggle-push"></div></div>
     <div class="detail-toggle-row"><span>Ovoz</span><div class="toggle-switch ${sound?'on':''}" id="toggle-sound"></div></div>
     <div class="detail-toggle-row"><span>Tebranish</span><div class="toggle-switch ${vibrate?'on':''}" id="toggle-vibrate"></div></div>
-    <p class="detail-desc" style="margin-top:16px;">Push yoqilsa, brauzer ruxsat so'raydi. Yangi xabar kelganda ilova fonda bo'lsa, qurilmangizda haqiqiy bildirishnoma chiqadi.</p>
+    <p class="detail-desc" style="margin-top:16px;">Yoqilsa, brauzer ruxsat so'raydi. Telefon bloklangan yoki ilova yopiq bo'lsa ham, yangi xabar va qo'ng'iroq bildirishnomasi chiqadi.</p>
   `;
 }
 function wireNotificationsDetail(){
@@ -2475,20 +2511,15 @@ function wireNotificationsDetail(){
     if(pushBtn.classList.contains('on')){
       pushBtn.classList.remove('on');
       localStorage.setItem('mchat_notif_push', '0');
+      disablePush();
       return;
     }
     if(!('Notification' in window)){
       showToast("Brauzer push bildirishnomani qo'llamaydi");
       return;
     }
-    const perm = await Notification.requestPermission();
-    if(perm === 'granted'){
-      pushBtn.classList.add('on');
-      localStorage.setItem('mchat_notif_push', '1');
-      showToast("Push bildirishnomalar yoqildi");
-    }else{
-      showToast("Ruxsat berilmadi");
-    }
+    const ok = await enablePush(true);
+    if(ok) pushBtn.classList.add('on');
   });
   document.getElementById('toggle-sound').addEventListener('click', function(){
     const on = this.classList.toggle('on');
@@ -3099,6 +3130,94 @@ document.getElementById('ac-result').addEventListener('click', (e)=>{
   }
 });
 
+/* ================= PUSH BILDIRISHNOMALAR (telefon bloklangan/ilova yopiq bo'lganda) ================= */
+const VAPID_PUBLIC = 'BC6XFcatino1ZOBW4Pwiq7zQVtXJGNOh81TCNXS_eWrOPuNQGXy-P3MZAWw60b3aCUCEsebY3ckjQwyXnzLCdmY';
+let pushWorkerUrl = localStorage.getItem('mchat_push_url') || '';
+
+function urlB64ToUint8(b64){
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(raw.length);
+  for(let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+function bufToB64u(buf){
+  const u = new Uint8Array(buf);
+  let s = '';
+  for(let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function pushSupported(){
+  return ('Notification' in window) && ('serviceWorker' in navigator) && ('PushManager' in window);
+}
+
+async function enablePush(interactive){
+  try{
+    if(!pushSupported()){ if(interactive) showToast("Bu brauzer push bildirishnomani qo'llamaydi"); return false; }
+    const db = getDb(), uid = myUid();
+    if(!db || !uid){ if(interactive) showToast("Avval Google bilan kiring"); return false; }
+    let perm = Notification.permission;
+    if(perm === 'default' && interactive) perm = await Notification.requestPermission();
+    if(perm !== 'granted'){ if(interactive) showToast("Bildirishnoma ruxsati berilmadi"); return false; }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if(sub && sub.options && sub.options.applicationServerKey && bufToB64u(sub.options.applicationServerKey) !== VAPID_PUBLIC){
+      try{ await sub.unsubscribe(); }catch(e){}
+      sub = null;
+    }
+    if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(VAPID_PUBLIC) });
+    const j = sub.toJSON();
+    await db.collection('push').doc(uid).set({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, updatedAt: Date.now() });
+    localStorage.setItem('mchat_push_ok', '1');
+    localStorage.setItem('mchat_notif_push', '1');
+    try{ renderChatList(); }catch(e){}
+    if(interactive) showToast("Bildirishnomalar yoqildi");
+    return true;
+  }catch(e){
+    if(interactive) showToast("Bildirishnomani yoqib bo'lmadi: " + String((e && (e.code || e.message)) || e).slice(0, 60));
+    return false;
+  }
+}
+async function disablePush(){
+  try{
+    localStorage.removeItem('mchat_push_ok');
+    if(pushSupported()){
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(sub) await sub.unsubscribe();
+    }
+    const db = getDb(), uid = myUid();
+    if(db && uid) await db.collection('push').doc(uid).delete();
+  }catch(e){}
+  try{ renderChatList(); }catch(e){}
+}
+
+// suhbatdoshning telefoniga push yuboradi (Cloudflare Worker orqali)
+async function notifyPeer(toUid, kind, text){
+  try{
+    if(!pushWorkerUrl || !toUid) return;
+    const u = firebase.auth().currentUser;
+    if(!u) return;
+    const tok = await u.getIdToken();
+    fetch(pushWorkerUrl.replace(/\/+$/, '') + '/notify', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: toUid, kind: kind, text: String(text || '').slice(0, 120) }),
+      keepalive: true
+    }).catch(()=>{});
+  }catch(e){}
+}
+
+function pushBannerHtml(){
+  if(!pushSupported()) return '';
+  if(Notification.permission === 'denied') return '';
+  if(Notification.permission === 'granted' && localStorage.getItem('mchat_push_ok') === '1') return '';
+  return '<div class="push-banner" style="margin:10px 12px;padding:12px 14px;border-radius:12px;background:#E7F6EF;color:#075E54;font-size:14px;line-height:1.4;"><b>Bildirishnomalarni yoqish</b><br><span style="font-size:13px;">Telefon bloklanganda ham xabar va qo\'ng\'iroqlar kelishi uchun shu yerni bosing.</span></div>';
+}
+document.getElementById('chat-list').addEventListener('click', (e)=>{
+  if(e.target.closest('.push-banner')) enablePush(true);
+});
+
 /* ================= HAQIQIY XABARLAR (Firestore) + 24 SOATDA O'CHISH ================= */
 const MSG_TTL = 24 * 60 * 60 * 1000;
 const msgStore = new Map();
@@ -3124,6 +3243,7 @@ async function sendToFirestore(chat, payload){
   }, payload);
   try{
     await db.collection('messages').add(doc);
+    notifyPeer(chat.peerUid, 'msg', payload.type === 'voice' ? '🎤 Ovozli xabar' : payload.text);
     return true;
   }catch(e){
     showToast(dbErrorHelp(e && e.code));
@@ -3278,6 +3398,7 @@ async function refreshPeerPhotos(){
 
 function startRealtime(){
   loadTurnConfig();
+  if(pushSupported() && Notification.permission === 'granted') enablePush(false);
   startMessageListener();
   startCallListener();
   refreshPeerPhotos();
