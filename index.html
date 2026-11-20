@@ -1679,6 +1679,8 @@ if(MY_TURN) ICE_SERVERS.unshift(MY_TURN);
 let remoteTurn = null;
 try{ remoteTurn = JSON.parse(localStorage.getItem('mchat_turn') || 'null'); }catch(e){ remoteTurn = null; }
 let turnLoaded = false;
+let turnFetchedAt = 0;
+let turnErr = '';
 function getIceServers(){
   return remoteTurn ? [].concat(remoteTurn, ICE_SERVERS) : ICE_SERVERS;
 }
@@ -1690,6 +1692,34 @@ async function loadTurnConfig(){
     turnLoaded = true;
     if(!sn.exists) return;
     const d = sn.data() || {};
+    // 0-usul: Turnix.io (token Firebase'da saqlanadi, GitHub'da emas)
+    if(typeof d.turnixToken === 'string' && d.turnixToken.length > 8){
+      try{
+        const r = await fetch('https://turnix.io/api/v1/credentials/ice', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + d.turnixToken.trim(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ttl: 3600 })
+        });
+        if(!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        let list = [];
+        if(Array.isArray(j)) list = j;
+        else if(j && Array.isArray(j.iceServers)) list = j.iceServers;
+        else if(j && j.iceServers && j.iceServers.urls) list = [j.iceServers];
+        else if(j && j.urls) list = [j];
+        list = list.filter(x => x && x.urls);
+        if(list.length){
+          remoteTurn = list;
+          turnFetchedAt = Date.now();
+          turnErr = '';
+          try{ localStorage.setItem('mchat_turn', JSON.stringify(remoteTurn)); }catch(e){}
+          return;
+        }
+        throw new Error('bo\'sh javob');
+      }catch(e){
+        turnErr = String(e && e.message || e).slice(0, 40);
+      }
+    }
     // 1-usul: Metered "credentials API" havolasi (apiUrl) — eng oson
     if(typeof d.apiUrl === 'string' && /^https:\/\//i.test(d.apiUrl)){
       try{
@@ -1875,7 +1905,7 @@ function updateCallDebug(){
   const el = cEl('call-debug');
   if(!el) return;
   if(!pc || (callState && callState.connected)){ el.textContent = ''; return; }
-  el.textContent = 'Tarmoq: ' + pc.iceConnectionState + ' · host ' + iceCount.host + ' · stun ' + iceCount.srflx + ' · relay ' + iceCount.relay + (remoteTurn ? ' · TURN ✓' : ' · TURN yo\'q') + (lastIceErr && !iceCount.relay ? ' · xato ' + lastIceErr : '');
+  el.textContent = 'Tarmoq: ' + pc.iceConnectionState + ' · host ' + iceCount.host + ' · stun ' + iceCount.srflx + ' · relay ' + iceCount.relay + (remoteTurn ? ' · TURN ✓' : ' · TURN yo\'q') + (turnErr ? ' (' + turnErr + ')' : '') + (lastIceErr && !iceCount.relay ? ' · xato ' + lastIceErr : '');
 }
 function armConnectTimeout(st){
   clearTimeout(connectTimeoutId);
@@ -1986,7 +2016,7 @@ async function startOutgoingCall(peer, isVideo){
   callFacingMode = 'user';
   showCallUi(peer.name, peer.avatar, isVideo, false);
   setCallStatus("Qo'ng'iroq qilinmoqda...");
-  if(!turnLoaded) await Promise.race([loadTurnConfig(), new Promise(r => setTimeout(r, 2500))]);
+  if(!turnLoaded || Date.now() - turnFetchedAt > 30 * 60 * 1000) await Promise.race([loadTurnConfig(), new Promise(r => setTimeout(r, 3500))]);
   try{
     await getLocalMedia(isVideo);
   }catch(e){
@@ -2094,7 +2124,7 @@ async function acceptCall(){
   }
   if(callState !== st){ stopCallMedia(); return; }
   updateCallButtons();
-  if(!turnLoaded) await Promise.race([loadTurnConfig(), new Promise(r => setTimeout(r, 2000))]);
+  if(!turnLoaded || Date.now() - turnFetchedAt > 30 * 60 * 1000) await Promise.race([loadTurnConfig(), new Promise(r => setTimeout(r, 3500))]);
   if(callState !== st){ stopCallMedia(); return; }
   try{
     pc = createPeer();
