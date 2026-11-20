@@ -1718,6 +1718,11 @@ async function loadTurnConfig(){
         throw new Error('bo\'sh javob');
       }catch(e){
         turnErr = String(e && e.message || e).slice(0, 40);
+        if(/fetch|network/i.test(turnErr)){
+          // CORS (sayt ruxsati) yoki tarmoq muammosini ajratamiz
+          try{ await fetch('https://turnix.io/', { mode: 'no-cors' }); turnErr = 'CORS: turnix.io ruxsat bermadi'; }
+          catch(e2){ turnErr = 'turnix.io ochilmadi (tarmoq)'; }
+        }
       }
     }
     // 1-usul: Metered "credentials API" havolasi (apiUrl) — eng oson
