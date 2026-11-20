@@ -627,8 +627,8 @@ if ('serviceWorker' in navigator) {
   .call-round.decline svg{ transform:rotate(135deg); }
   .call-round.accept{ background:#25D366; }
   .call-avatar-voice{
-    position:absolute; top:40%; left:50%; transform:translate(-50%,-50%);
-    width:120px; height:120px; border-radius:50%;
+    position:absolute; top:38%; left:50%; transform:translate(-50%,-50%);
+    width:210px; height:210px; border-radius:50%;
     object-fit:cover;
     box-shadow:0 10px 30px rgba(0,0,0,.3);
   }
@@ -1054,6 +1054,7 @@ if ('serviceWorker' in navigator) {
     <div class="call-top">
       <div class="call-name" id="call-name"></div>
       <div class="call-status" id="call-status">Qo'ng'iroq qilinmoqda...</div>
+      <div id="call-debug" style="font-size:11px;color:rgba(255,255,255,.55);margin-top:4px;"></div>
     </div>
     <div class="call-side-btns" id="call-side-btns">
       <div class="call-side-btn" id="call-addperson-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></div>
@@ -1212,9 +1213,10 @@ if(!Array.isArray(callLog)) callLog = [];
 
 let activeChatId = null;
 
+function lowPhoto(p){ return (typeof p === 'string' && p.length <= 20000) ? p : ''; }
 function saveChats(){
   try{
-    localStorage.setItem('mchat_chats', JSON.stringify(chats.map(c => ({ id:c.id, name:c.name, avatar:c.avatar, peerUid:c.peerUid, real:true, last:c.last||'', time:c.time||'', ts:c.ts||0 }))));
+    localStorage.setItem('mchat_chats', JSON.stringify(chats.map(c => ({ id:c.id, name:c.name, avatar:lowPhoto(c.avatar), peerUid:c.peerUid, real:true, last:c.last||'', time:c.time||'', ts:c.ts||0 }))));
   }catch(e){}
 }
 
@@ -1663,12 +1665,41 @@ let callMicOn = true;
 let callCamOn = true;
 let callSpeakerOn = true;
 
+// O'zingizning TURN serveringiz bo'lsa (eng ishonchli yo'l), shu yerga yozing:
+//   MY_TURN = { urls: ['turn:xxx.metered.live:80', 'turns:xxx.metered.live:443?transport=tcp'], username: '...', credential: '...' }
+const MY_TURN = null;
 const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'],
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
+  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp', 'turns:openrelay.metered.ca:443?transport=tcp'],
     username: 'openrelayproject', credential: 'openrelayproject' }
 ];
+if(MY_TURN) ICE_SERVERS.unshift(MY_TURN);
+
+// TURN sozlamasi Firebase'dagi config/turn hujjatidan olinadi (bir marta kiritiladi, ikkala telefonga ham ishlaydi)
+let remoteTurn = null;
+try{ remoteTurn = JSON.parse(localStorage.getItem('mchat_turn') || 'null'); }catch(e){ remoteTurn = null; }
+let turnLoaded = false;
+function getIceServers(){
+  return remoteTurn ? [remoteTurn].concat(ICE_SERVERS) : ICE_SERVERS;
+}
+async function loadTurnConfig(){
+  const db = getDb();
+  if(!db || !myUid()) return;
+  try{
+    const sn = await db.collection('config').doc('turn').get();
+    turnLoaded = true;
+    if(!sn.exists) return;
+    const d = sn.data() || {};
+    let urls = Array.isArray(d.urls) ? d.urls : (typeof d.urls === 'string' ? d.urls.split(',') : []);
+    urls = urls.map(x => String(x).trim()).filter(x => /^turns?:/i.test(x));
+    if(urls.length && d.username && d.credential){
+      remoteTurn = { urls: urls, username: String(d.username), credential: String(d.credential) };
+      try{ localStorage.setItem('mchat_turn', JSON.stringify(remoteTurn)); }catch(e){}
+    }
+  }catch(e){}
+}
+let iceCount = { host: 0, srflx: 0, relay: 0 };
+let connectTimeoutId = null;
 let pc = null;
 let callBusy = false;
 let callEnding = false;
@@ -1724,9 +1755,14 @@ function updateCallButtons(){
   cEl('call-overlay').classList.toggle('local-on', !!(callIsVideo && callCamOn && callStream));
 }
 
+function hiPhoto(u){
+  // Google profil rasmlari uchun kattaroq o'lcham so'raladi (s96 -> s800)
+  if(typeof u === 'string' && /^https:\/\/[a-z0-9-]+\.googleusercontent\.com\//i.test(u)) return u.replace(/=s\d+(-c)?$/i, '=s800-c');
+  return u;
+}
 function showCallUi(name, avatar, isVideo, incoming){
   const ov = cEl('call-overlay');
-  cEl('call-avatar').src = avatar || LOGO;
+  cEl('call-avatar').src = hiPhoto(avatar) || LOGO;
   cEl('call-name').textContent = name || 'M-CHAT';
   callIsVideo = !!isVideo;
   ov.classList.remove('remote-on', 'local-on');
@@ -1779,13 +1815,22 @@ function showCallNotification(name, video){
 
 /* ---- peer ulanish ---- */
 function createPeer(){
-  const p = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  iceCount = { host: 0, srflx: 0, relay: 0 };
+  const p = new RTCPeerConnection({ iceServers: getIceServers(), iceCandidatePoolSize: 2 });
+  p.oniceconnectionstatechange = ()=>{ if(pc === p) updateCallDebug(); };
   p.ontrack = (e)=>{
     const stream = (e.streams && e.streams[0]) ? e.streams[0] : null;
     if(!stream) return;
     const a = cEl('call-remote-audio');
-    a.srcObject = stream;
-    a.play().catch(()=>{});
+    if(a.srcObject !== stream) a.srcObject = stream;
+    a.volume = callSpeakerOn ? 1 : 0.4;
+    const pl = a.play();
+    if(pl && pl.catch) pl.catch(()=>{
+      showToast("Ovoz chiqmasa, ekranga bir marta bosing");
+      const ov = cEl('call-overlay');
+      const once = ()=>{ a.play().catch(()=>{}); ov.removeEventListener('click', once); };
+      ov.addEventListener('click', once);
+    });
     if(e.track.kind === 'video'){
       cEl('call-remote-video').srcObject = stream;
       cEl('call-overlay').classList.add('remote-on');
@@ -1802,6 +1847,26 @@ function createPeer(){
     }
   };
   return p;
+}
+
+function noteIce(c){
+  const t = c && (c.type || (c.candidate && (/ typ (\w+)/.exec(c.candidate) || [])[1]));
+  if(t === 'host' || t === 'srflx' || t === 'relay') iceCount[t]++;
+  updateCallDebug();
+}
+function updateCallDebug(){
+  const el = cEl('call-debug');
+  if(!el) return;
+  if(!pc || (callState && callState.connected)){ el.textContent = ''; return; }
+  el.textContent = 'Tarmoq: ' + pc.iceConnectionState + ' · host ' + iceCount.host + ' · stun ' + iceCount.srflx + ' · relay ' + iceCount.relay + (remoteTurn ? ' · TURN ✓' : ' · TURN yo\'q');
+}
+function armConnectTimeout(st){
+  clearTimeout(connectTimeoutId);
+  connectTimeoutId = setTimeout(()=>{
+    if(callState === st && !st.connected){
+      endCall(true, "Ulanib bo'lmadi: tarmoq (TURN server) muammosi. Boshqa internet (Wi-Fi/4G) bilan urinib ko'ring.", 'ended');
+    }
+  }, 25000);
 }
 
 function flushIce(){
@@ -1828,6 +1893,8 @@ function onCallConnected(){
   callState.connected = true;
   if(stopRing){ stopRing(); stopRing = null; }
   clearTimeout(ringTimeoutId);
+  clearTimeout(connectTimeoutId); connectTimeoutId = null;
+  updateCallDebug();
   const t0 = Date.now();
   setCallStatus('00:00');
   clearInterval(callTimerId);
@@ -1838,6 +1905,8 @@ function teardownCall(){
   if(stopRing){ stopRing(); stopRing = null; }
   clearInterval(callTimerId); callTimerId = null;
   clearTimeout(ringTimeoutId); ringTimeoutId = null;
+  clearTimeout(connectTimeoutId); connectTimeoutId = null;
+  { const dbg = cEl('call-debug'); if(dbg) dbg.textContent = ''; }
   callUnsubs.forEach(f=>{ try{ f(); }catch(e){} });
   callUnsubs = [];
   if(pc){
@@ -1900,6 +1969,7 @@ async function startOutgoingCall(peer, isVideo){
   callFacingMode = 'user';
   showCallUi(peer.name, peer.avatar, isVideo, false);
   setCallStatus("Qo'ng'iroq qilinmoqda...");
+  if(!turnLoaded) await Promise.race([loadTurnConfig(), new Promise(r => setTimeout(r, 2500))]);
   try{
     await getLocalMedia(isVideo);
   }catch(e){
@@ -1919,6 +1989,7 @@ async function startOutgoingCall(peer, isVideo){
     const pushIce = (c)=> ref.collection('candidates').add({ from: uid, c: JSON.stringify(c) }).catch(()=>{});
     pc.onicecandidate = (e)=>{
       if(!e.candidate) return;
+      noteIce(e.candidate);
       if(docReady) pushIce(e.candidate); else iceQueue.push(e.candidate);
     };
     const offer = await pc.createOffer();
@@ -1940,7 +2011,7 @@ async function startOutgoingCall(peer, isVideo){
       }
       if(d.status === 'accepted'){
         if(stopRing){ stopRing(); stopRing = null; }
-        if(!st.connected) setCallStatus('Ulanmoqda...');
+        if(!st.connected){ setCallStatus('Ulanmoqda...'); if(!connectTimeoutId) armConnectTimeout(st); }
       }else if(d.status === 'declined'){
         endCall(false, "Qo'ng'iroq rad etildi");
       }else if(d.status === 'ended' || d.status === 'missed'){
@@ -1995,6 +2066,7 @@ async function acceptCall(){
   const ref = st.ref, uid = myUid();
   cEl('call-overlay').classList.remove('incoming');
   setCallStatus('Ulanmoqda...');
+  armConnectTimeout(st);
   try{
     await getLocalMedia(st.video);
   }catch(e){
@@ -2005,11 +2077,15 @@ async function acceptCall(){
   }
   if(callState !== st){ stopCallMedia(); return; }
   updateCallButtons();
+  if(!turnLoaded) await Promise.race([loadTurnConfig(), new Promise(r => setTimeout(r, 2000))]);
+  if(callState !== st){ stopCallMedia(); return; }
   try{
     pc = createPeer();
     callStream.getTracks().forEach(t=> pc.addTrack(t, callStream));
     pc.onicecandidate = (e)=>{
-      if(e.candidate) ref.collection('candidates').add({ from: uid, c: JSON.stringify(e.candidate) }).catch(()=>{});
+      if(!e.candidate) return;
+      noteIce(e.candidate);
+      ref.collection('candidates').add({ from: uid, c: JSON.stringify(e.candidate) }).catch(()=>{});
     };
     callUnsubs.push(watchCandidates(ref, uid));
     await pc.setRemoteDescription(new RTCSessionDescription(st.offer));
@@ -2124,11 +2200,11 @@ if(avatarImgEl && avatarFileInput){
     e.target.value = '';
     if(!file) return;
     try{
-      const dataUrl = await compressImageFile(file, 384, 0.85);
+      const dataUrl = await compressImageFile(file, 960, 0.9);
       localStorage.setItem('mchat_photo', dataUrl);
       localStorage.setItem('mchat_custom_photo', '1');
       document.querySelectorAll('.settings-profile img, #profile-edit-avatar').forEach(img=> img.src = dataUrl);
-      localStorage.removeItem('mchat_photo_thumb');
+      localStorage.removeItem('mchat_photo_thumb2');
       syncMyProfile();
       showToast("Profil surati yangilandi");
     }catch(err){
@@ -2621,7 +2697,7 @@ function getDb(){
 function myUid(){
   try{ const u = firebase.auth().currentUser; return u ? u.uid : null; }catch(e){ return null; }
 }
-function thumbFromDataUrl(dataUrl, size){
+function thumbFromDataUrl(dataUrl, size, quality){
   return new Promise(resolve=>{
     const im = new Image();
     im.onload = ()=>{
@@ -2629,7 +2705,7 @@ function thumbFromDataUrl(dataUrl, size){
       const w = Math.max(1, Math.round(im.naturalWidth * s)), h = Math.max(1, Math.round(im.naturalHeight * s));
       const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
       cv.getContext('2d').drawImage(im, 0, 0, w, h);
-      resolve(cv.toDataURL('image/jpeg', 0.7));
+      resolve(cv.toDataURL('image/jpeg', quality || 0.7));
     };
     im.onerror = ()=> resolve('');
     im.src = dataUrl;
@@ -2642,16 +2718,21 @@ async function syncMyProfile(){
     const user = firebase.auth().currentUser;
     let photo = '';
     if(localStorage.getItem('mchat_custom_photo') === '1'){
-      let t = localStorage.getItem('mchat_photo_thumb');
+      localStorage.removeItem('mchat_photo_thumb');
+      let t = localStorage.getItem('mchat_photo_thumb2');
       if(!t){
         const full = localStorage.getItem('mchat_photo');
-        if(full){ t = await thumbFromDataUrl(full, 96); if(t) localStorage.setItem('mchat_photo_thumb', t); }
+        if(full){
+          t = await thumbFromDataUrl(full, 560, 0.82);
+          if(t && t.length > 110000) t = await thumbFromDataUrl(full, 420, 0.7);
+          if(t) localStorage.setItem('mchat_photo_thumb2', t);
+        }
       }
       photo = t || '';
     }else{
       photo = user.photoURL || '';
     }
-    if(photo.length > 30000) photo = '';
+    if(photo.length > 120000) photo = '';
     const name = (localStorage.getItem('mchat_name') || user.displayName || (localStorage.getItem('mchat_email') || '').split('@')[0] || 'Foydalanuvchi').slice(0, 60);
     await db.collection('users').doc(uid).set({ uid: uid, name: name, photo: photo, updatedAt: Date.now() });
     lastDbError = '';
@@ -2680,7 +2761,7 @@ async function syncMyPhone(phoneRaw){
 
 let contacts = [];
 try{ contacts = JSON.parse(localStorage.getItem('mchat_contacts') || '[]'); }catch(e){ contacts = []; }
-function saveContacts(){ try{ localStorage.setItem('mchat_contacts', JSON.stringify(contacts)); }catch(e){} }
+function saveContacts(){ try{ localStorage.setItem('mchat_contacts', JSON.stringify(contacts.map(x => ({ uid:x.uid, name:x.name, photo:lowPhoto(x.photo) })))); }catch(e){} }
 function addContact(user){
   if(!contacts.some(x => x.uid === user.uid)){
     contacts.push({ uid: user.uid, name: user.name, photo: user.photo || '' });
@@ -2698,7 +2779,7 @@ if(!Array.isArray(scannedNums)) scannedNums = [];
 let dirState = 'idle';
 function savePhoneMatches(){
   try{
-    localStorage.setItem('mchat_phone_matches', JSON.stringify(dirUsers));
+    localStorage.setItem('mchat_phone_matches', JSON.stringify(dirUsers.map(x => ({ uid:x.uid, n:x.n, name:x.name, photo:lowPhoto(x.photo) }))));
     localStorage.setItem('mchat_scanned_nums', JSON.stringify(scannedNums));
   }catch(e){}
 }
@@ -3092,9 +3173,35 @@ function startMessageListener(){
   });
 }
 
+async function refreshPeerPhotos(){
+  const db = getDb();
+  if(!db || !myUid()) return;
+  const ids = new Set();
+  chats.forEach(c => { if(c.peerUid) ids.add(c.peerUid); });
+  dirUsers.forEach(u => ids.add(u.uid));
+  contacts.forEach(u => ids.add(u.uid));
+  const arr = Array.from(ids).slice(0, 100);
+  const photos = {};
+  for(let i = 0; i < arr.length; i += 10){
+    try{
+      const snap = await db.collection('users').where(firebase.firestore.FieldPath.documentId(), 'in', arr.slice(i, i + 10)).get();
+      snap.forEach(d => { const u = d.data(); if(u && u.photo) photos[d.id] = u.photo; });
+    }catch(e){}
+  }
+  chats.forEach(c => { if(photos[c.peerUid]) c.avatar = safePhoto(photos[c.peerUid]); });
+  dirUsers.forEach(u => { if(photos[u.uid]) u.photo = photos[u.uid]; });
+  contacts.forEach(u => { if(photos[u.uid]) u.photo = photos[u.uid]; });
+  renderChatList();
+  try{ renderNewChatList(); }catch(e){}
+  const act = chats.find(c => c.id === activeChatId);
+  if(act) document.getElementById('detail-avatar').src = act.avatar;
+}
+
 function startRealtime(){
+  loadTurnConfig();
   startMessageListener();
   startCallListener();
+  refreshPeerPhotos();
   if(!expiryTimer) expiryTimer = setInterval(()=>{ if(msgUnsub) onStoreChanged(); }, 60000);
 }
 function stopRealtime(){
