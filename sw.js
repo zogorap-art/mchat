@@ -1,4 +1,4 @@
-const CACHE_NAME = "mchat-cache-v4";
+const CACHE_NAME = "mchat-cache-v5";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./icon-180.png", "./icon-32.png", "./icon-16.png"];
 
 self.addEventListener("install", (event) => {
