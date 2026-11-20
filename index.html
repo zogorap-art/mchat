@@ -1680,7 +1680,7 @@ let remoteTurn = null;
 try{ remoteTurn = JSON.parse(localStorage.getItem('mchat_turn') || 'null'); }catch(e){ remoteTurn = null; }
 let turnLoaded = false;
 function getIceServers(){
-  return remoteTurn ? [remoteTurn].concat(ICE_SERVERS) : ICE_SERVERS;
+  return remoteTurn ? [].concat(remoteTurn, ICE_SERVERS) : ICE_SERVERS;
 }
 async function loadTurnConfig(){
   const db = getDb();
@@ -1690,6 +1690,20 @@ async function loadTurnConfig(){
     turnLoaded = true;
     if(!sn.exists) return;
     const d = sn.data() || {};
+    // 1-usul: Metered "credentials API" havolasi (apiUrl) — eng oson
+    if(typeof d.apiUrl === 'string' && /^https:\/\//i.test(d.apiUrl)){
+      try{
+        const r = await fetch(d.apiUrl);
+        const list = await r.json();
+        const ok = (Array.isArray(list) ? list : []).filter(x => x && x.urls);
+        if(ok.length){
+          remoteTurn = ok;
+          try{ localStorage.setItem('mchat_turn', JSON.stringify(remoteTurn)); }catch(e){}
+          return;
+        }
+      }catch(e){}
+    }
+    // 2-usul: urls + username + credential
     let urls = Array.isArray(d.urls) ? d.urls : (typeof d.urls === 'string' ? d.urls.split(',') : []);
     urls = urls.map(x => String(x).trim()).filter(x => /^turns?:/i.test(x));
     if(urls.length && d.username && d.credential){
