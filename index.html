@@ -1714,6 +1714,7 @@ async function loadTurnConfig(){
 }
 let iceCount = { host: 0, srflx: 0, relay: 0 };
 let connectTimeoutId = null;
+let lastIceErr = '';
 let pc = null;
 let callBusy = false;
 let callEnding = false;
@@ -1830,8 +1831,10 @@ function showCallNotification(name, video){
 /* ---- peer ulanish ---- */
 function createPeer(){
   iceCount = { host: 0, srflx: 0, relay: 0 };
+  lastIceErr = '';
   const p = new RTCPeerConnection({ iceServers: getIceServers(), iceCandidatePoolSize: 2 });
   p.oniceconnectionstatechange = ()=>{ if(pc === p) updateCallDebug(); };
+  p.onicecandidateerror = (e)=>{ if(pc === p){ lastIceErr = (e.errorCode || '') + ' ' + String(e.url || '').replace(/^(stuns?|turns?):/, '$1:').slice(0, 40); updateCallDebug(); } };
   p.ontrack = (e)=>{
     const stream = (e.streams && e.streams[0]) ? e.streams[0] : null;
     if(!stream) return;
@@ -1872,7 +1875,7 @@ function updateCallDebug(){
   const el = cEl('call-debug');
   if(!el) return;
   if(!pc || (callState && callState.connected)){ el.textContent = ''; return; }
-  el.textContent = 'Tarmoq: ' + pc.iceConnectionState + ' · host ' + iceCount.host + ' · stun ' + iceCount.srflx + ' · relay ' + iceCount.relay + (remoteTurn ? ' · TURN ✓' : ' · TURN yo\'q');
+  el.textContent = 'Tarmoq: ' + pc.iceConnectionState + ' · host ' + iceCount.host + ' · stun ' + iceCount.srflx + ' · relay ' + iceCount.relay + (remoteTurn ? ' · TURN ✓' : ' · TURN yo\'q') + (lastIceErr && !iceCount.relay ? ' · xato ' + lastIceErr : '');
 }
 function armConnectTimeout(st){
   clearTimeout(connectTimeoutId);
