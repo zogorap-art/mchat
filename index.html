@@ -1901,6 +1901,30 @@ function createPeer(){
   return p;
 }
 
+let statsTimer = null;
+function startCallStats(){
+  clearInterval(statsTimer);
+  statsTimer = setInterval(async ()=>{
+    if(!pc || !callState || !callState.connected) return;
+    try{
+      const rep = await pc.getStats();
+      let sent = 0, recv = 0, mic = 0, spk = 0;
+      rep.forEach(r=>{
+        if(r.type === 'outbound-rtp' && r.kind === 'audio') sent += r.bytesSent || 0;
+        if(r.type === 'inbound-rtp' && r.kind === 'audio'){
+          recv += r.bytesReceived || 0;
+          if(typeof r.audioLevel === 'number') spk = Math.max(spk, r.audioLevel);
+        }
+        if(r.type === 'media-source' && r.kind === 'audio' && typeof r.audioLevel === 'number') mic = Math.max(mic, r.audioLevel);
+      });
+      const a = cEl('call-remote-audio');
+      if(a.srcObject && a.paused) a.play().catch(()=>{});
+      cEl('call-debug').textContent = '↑' + Math.round(sent/1024) + 'kB ↓' + Math.round(recv/1024) + 'kB · mik ' + mic.toFixed(2) +
+        ' · karnay ' + spk.toFixed(2) + ' · ' + (a.paused ? 'audio PAUSED' : 'audio ok') + ' · vol ' + a.volume;
+    }catch(e){}
+  }, 1500);
+}
+
 function noteIce(c){
   const t = c && (c.type || (c.candidate && (/ typ (\w+)/.exec(c.candidate) || [])[1]));
   if(t === 'host' || t === 'srflx' || t === 'relay') iceCount[t]++;
@@ -1909,7 +1933,8 @@ function noteIce(c){
 function updateCallDebug(){
   const el = cEl('call-debug');
   if(!el) return;
-  if(!pc || (callState && callState.connected)){ el.textContent = ''; return; }
+  if(callState && callState.connected) return;
+  if(!pc){ el.textContent = ''; return; }
   el.textContent = 'Tarmoq: ' + pc.iceConnectionState + ' · host ' + iceCount.host + ' · stun ' + iceCount.srflx + ' · relay ' + iceCount.relay + (remoteTurn ? ' · TURN ✓' : ' · TURN yo\'q') + (turnErr ? ' (' + turnErr + ')' : '') + (lastIceErr && !iceCount.relay ? ' · xato ' + lastIceErr : '');
 }
 function armConnectTimeout(st){
@@ -1947,6 +1972,7 @@ function onCallConnected(){
   clearTimeout(ringTimeoutId);
   clearTimeout(connectTimeoutId); connectTimeoutId = null;
   updateCallDebug();
+  startCallStats();
   const t0 = Date.now();
   setCallStatus('00:00');
   clearInterval(callTimerId);
@@ -1958,6 +1984,7 @@ function teardownCall(){
   clearInterval(callTimerId); callTimerId = null;
   clearTimeout(ringTimeoutId); ringTimeoutId = null;
   clearTimeout(connectTimeoutId); connectTimeoutId = null;
+  clearInterval(statsTimer); statsTimer = null;
   { const dbg = cEl('call-debug'); if(dbg) dbg.textContent = ''; }
   callUnsubs.forEach(f=>{ try{ f(); }catch(e){} });
   callUnsubs = [];
