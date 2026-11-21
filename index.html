@@ -383,6 +383,7 @@ if ('serviceWorker' in navigator) {
   .media-vid-ph{ position:relative; width:240px; max-width:100%; height:170px; border-radius:6px; background-size:cover; background-position:center; background-color:#333; cursor:pointer; }
   .media-play{ position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:48px; height:48px; border-radius:50%; background:rgba(0,0,0,.55); color:#fff; display:flex; align-items:center; justify-content:center; font-size:20px; }
   .media-dur{ position:absolute; left:8px; bottom:6px; font-size:11px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.7); }
+  .media-prog{ position:absolute; left:8px; bottom:8px; background:rgba(0,0,0,.6); color:#fff; font-size:12px; padding:3px 8px; border-radius:10px; pointer-events:none; }
   .media-gone{ font-size:13px; color:var(--text-grey); padding:8px 4px; }
   #upload-bar{ position:fixed; left:12px; right:12px; bottom:calc(76px + env(safe-area-inset-bottom)); z-index:60; background:#075E54; color:#fff; border-radius:12px; padding:10px 14px; font-size:13px; display:none; }
   #upload-bar .ub-track{ height:4px; border-radius:2px; background:rgba(255,255,255,.3); margin-top:6px; overflow:hidden; }
@@ -1803,7 +1804,7 @@ function applyLocalMirror(){
 async function getLocalMedia(isVideo){
   const constraints = {
     audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true },
-    video: isVideo ? { facingMode: callFacingMode } : false
+    video: isVideo ? { facingMode: callFacingMode, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } } : false
   };
   callStream = await navigator.mediaDevices.getUserMedia(constraints);
   const v = cEl('call-video');
@@ -1970,7 +1971,7 @@ function startCallStats(){
       if(a.srcObject && a.paused) a.play().catch(()=>{});
       const at = callStream && callStream.getAudioTracks()[0];
       const lab = at ? ((at.label || '?').slice(0, 24) + (at.enabled ? '' : ' OFF') + (at.muted ? ' MUTED' : '')) : "mikrofon yo'q";
-      cEl('call-debug').textContent = '↑' + Math.round(sent/1024) + 'kB ↓' + Math.round(recv/1024) + 'kB · mik(max) ' + micPeak.toFixed(2) +
+      if(debugOn()) cEl('call-debug').textContent = '↑' + Math.round(sent/1024) + 'kB ↓' + Math.round(recv/1024) + 'kB · mik(max) ' + micPeak.toFixed(2) +
         ' · karnay(max) ' + spkPeak.toFixed(2) + ' · ' + (a.paused ? 'audio PAUSED' : 'audio ok') + ' · ' + lab;
       // 8 soniya ichida mikrofonda hech qanday ovoz sezilmasa, mikrofonni soddaroq sozlama bilan qayta ulaymiz
       if(!micFixTried && callState.connectedAt && Date.now() - callState.connectedAt > 8000 && micPeak < 0.005){
@@ -1981,14 +1982,28 @@ function startCallStats(){
   }, 1500);
 }
 
+async function tuneVideoSender(){
+  try{
+    const sd = pc && pc.getSenders().find(x => x.track && x.track.kind === 'video');
+    if(!sd) return;
+    const prm = sd.getParameters();
+    if(!prm.encodings || !prm.encodings.length) prm.encodings = [{}];
+    prm.encodings[0].maxBitrate = 2500000;     // 2.5 Mbit/s gacha (tarmoq ruxsat bersa)
+    prm.encodings[0].maxFramerate = 30;
+    await sd.setParameters(prm);
+  }catch(e){}
+}
+
 function noteIce(c){
   const t = c && (c.type || (c.candidate && (/ typ (\w+)/.exec(c.candidate) || [])[1]));
   if(t === 'host' || t === 'srflx' || t === 'relay') iceCount[t]++;
   updateCallDebug();
 }
+function debugOn(){ return localStorage.getItem('mchat_debug') === '1'; }
 function updateCallDebug(){
   const el = cEl('call-debug');
   if(!el) return;
+  if(!debugOn()){ el.textContent = ''; return; }
   if(callState && callState.connected) return;
   if(!pc){ el.textContent = ''; return; }
   el.textContent = 'Tarmoq: ' + pc.iceConnectionState + ' · host ' + iceCount.host + ' · stun ' + iceCount.srflx + ' · relay ' + iceCount.relay + (remoteTurn ? ' · TURN ✓' : ' · TURN yo\'q') + (turnErr ? ' (' + turnErr + ')' : '') + (lastIceErr && !iceCount.relay ? ' · xato ' + lastIceErr : '');
@@ -2030,6 +2045,7 @@ function onCallConnected(){
   clearTimeout(connectTimeoutId); connectTimeoutId = null;
   updateCallDebug();
   startCallStats();
+  tuneVideoSender();
   const t0 = Date.now();
   setCallStatus('00:00');
   clearInterval(callTimerId);
@@ -2121,6 +2137,7 @@ async function startOutgoingCall(peer, isVideo){
   try{
     pc = createPeer();
     callStream.getTracks().forEach(t=> pc.addTrack(t, callStream));
+    tuneVideoSender();
     let docReady = false;
     const iceQueue = [];
     const pushIce = (c)=> ref.collection('candidates').add({ from: uid, c: JSON.stringify(c) }).catch(()=>{});
@@ -2139,6 +2156,12 @@ async function startOutgoingCall(peer, isVideo){
     docReady = true;
     iceQueue.forEach(pushIce);
     notifyPeer(peer.peerUid, 'call', isVideo ? 'video' : 'audio');
+    // Qabul qiluvchi telefon bloklangan bo'lsa, jiringlash davom etishi uchun har 7 soniyada qayta signal yuboramiz
+    const ringPush = setInterval(()=>{
+      if(callState === st && !st.connected) notifyPeer(peer.peerUid, 'call', isVideo ? 'video' : 'audio');
+      else clearInterval(ringPush);
+    }, 7000);
+    callUnsubs.push(()=> clearInterval(ringPush));
     if(callState !== st) return;   // foydalanuvchi bu orada bekor qildi
     stopRing = startRingtone(false);
     callUnsubs.push(ref.onSnapshot(snap=>{
@@ -2220,6 +2243,7 @@ async function acceptCall(){
   try{
     pc = createPeer();
     callStream.getTracks().forEach(t=> pc.addTrack(t, callStream));
+    tuneVideoSender();
     pc.onicecandidate = (e)=>{
       if(!e.candidate) return;
       noteIce(e.candidate);
@@ -2262,6 +2286,21 @@ function startCallListener(){
   }, ()=>{});
 }
 
+(function(){
+  let taps = 0, t0 = 0;
+  cEl('call-name').addEventListener('click', ()=>{
+    const now = Date.now();
+    if(now - t0 > 4000) taps = 0;
+    t0 = now; taps++;
+    if(taps >= 7){
+      taps = 0;
+      const on = !debugOn();
+      localStorage.setItem('mchat_debug', on ? '1' : '0');
+      showToast(on ? "Tashxis qatori yoqildi" : "Tashxis qatori o'chirildi");
+      updateCallDebug();
+    }
+  });
+})();
 cEl('call-accept-btn').addEventListener('click', acceptCall);
 cEl('call-decline-btn').addEventListener('click', ()=>{
   if(callState){ callState.declinedByMe = true; endCall(true, null, 'declined'); }
@@ -2296,7 +2335,7 @@ cEl('call-flip-btn').addEventListener('click', async ()=>{
   const next = (callFacingMode === 'user') ? 'environment' : 'user';
   try{
     callStream.getVideoTracks().forEach(t=>{ t.stop(); callStream.removeTrack(t); });
-    const ns = await navigator.mediaDevices.getUserMedia({ video: { facingMode: next }, audio: false });
+    const ns = await navigator.mediaDevices.getUserMedia({ video: { facingMode: next, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }, audio: false });
     const nt = ns.getVideoTracks()[0];
     const sender = pc.getSenders().find(x => x.track === null || (x.track && x.track.kind === 'video'));
     const vs = pc.getSenders().find(x => x.track && x.track.kind === 'video') || sender;
@@ -3161,6 +3200,8 @@ const MEDIA_MAX = 20 * 1024 * 1024;
 const mediaCache = new Map();      // mid -> blob URL
 const mediaLoading = new Set();
 const mediaGone = new Set();
+const uploadingMids = new Set();
+const uploadPct = new Map();
 
 function mediaBase(){ return pushWorkerUrl ? pushWorkerUrl.replace(/\/+$/, '') : ''; }
 
@@ -3168,13 +3209,17 @@ function mediaInnerHtml(m){
   if(!m.mid) return '<div class="media-gone">⚠️ Fayl mavjud emas</div>';
   if(mediaGone.has(m.mid)) return '<div class="media-gone">🗑 Fayl muddati tugagan (24 soat)</div>';
   const url = mediaCache.get(m.mid);
+  const prog = uploadingMids.has(m.mid)
+    ? '<div class="media-prog" data-mid="' + m.mid + '">⏳ ' + (uploadPct.get(m.mid) || 0) + '%</div>' : '';
+  let inner;
   if(m.type === 'image'){
-    return '<img class="media-img" data-mid="' + m.mid + '" data-kind="image" src="' + (url || m.thumb || '') + '" alt="rasm">';
+    inner = '<img class="media-img" data-mid="' + m.mid + '" data-kind="image" src="' + (url || m.thumb || '') + '" alt="rasm">';
+  }else if(url){
+    inner = '<video class="media-vid" data-mid="' + m.mid + '" src="' + url + '" controls playsinline preload="metadata"' + (m.thumb ? ' poster="' + m.thumb + '"' : '') + '></video>';
+  }else{
+    inner = '<div class="media-vid-ph" data-mid="' + m.mid + '" data-kind="video" style="' + (m.thumb ? "background-image:url('" + m.thumb + "');" : '') + '"><div class="media-play">▶</div><span class="media-dur">' + (m.duration && m.duration !== '0:00' ? m.duration : '') + '</span></div>';
   }
-  if(url){
-    return '<video class="media-vid" data-mid="' + m.mid + '" src="' + url + '" controls playsinline preload="metadata"' + (m.thumb ? ' poster="' + m.thumb + '"' : '') + '></video>';
-  }
-  return '<div class="media-vid-ph" data-mid="' + m.mid + '" data-kind="video" style="' + (m.thumb ? "background-image:url('" + m.thumb + "');" : '') + '"><div class="media-play">▶</div><span class="media-dur">' + (m.duration && m.duration !== '0:00' ? m.duration : '') + '</span></div>';
+  return '<div class="media-wrap" style="position:relative;">' + inner + prog + '</div>';
 }
 
 async function loadMedia(mid){
@@ -3182,7 +3227,7 @@ async function loadMedia(mid){
   if(mediaLoading.has(mid) || mediaGone.has(mid)) return null;
   mediaLoading.add(mid);
   try{
-    for(let attempt = 0; attempt < 6; attempt++){
+    for(let attempt = 0; attempt < 14; attempt++){
       const u = firebase.auth().currentUser;
       if(!u) break;
       const tok = await u.getIdToken();
@@ -3192,7 +3237,7 @@ async function loadMedia(mid){
         mediaCache.set(mid, url);
         return url;
       }
-      if(r.status === 404 && attempt < 5){ await new Promise(res => setTimeout(res, 4000)); continue; }   // KV yangi yozuv biroz kech ko'rinishi mumkin
+      if(r.status === 404 && attempt < 13){ await new Promise(res => setTimeout(res, 1200)); continue; }   // KV yangi yozuv biroz kech ko'rinishi mumkin
       if(r.status === 404) mediaGone.add(mid);
       break;
     }
@@ -3244,19 +3289,7 @@ document.getElementById('messages').addEventListener('click', async (e)=>{
   v.innerHTML = '<img alt="">';
   v.addEventListener('click', ()=>{ v.style.display = 'none'; });
   document.body.appendChild(v);
-  const ub = document.createElement('div');
-  ub.id = 'upload-bar';
-  ub.innerHTML = '<div id="ub-text"></div><div class="ub-track"><div class="ub-fill" id="ub-fill"></div></div>';
-  document.body.appendChild(ub);
 })();
-function showUploadBar(text, p){
-  const b = document.getElementById('upload-bar');
-  b.style.display = 'block';
-  document.getElementById('ub-text').textContent = text;
-  document.getElementById('ub-fill').style.width = Math.round((p || 0) * 100) + '%';
-}
-function hideUploadBar(){ document.getElementById('upload-bar').style.display = 'none'; }
-
 function guessMime(file){
   let t = (file.type || '').toLowerCase().split(';')[0];
   if(t) return t;
@@ -3287,11 +3320,11 @@ async function decodeImage(file){
 async function prepareImage(file){
   const im = await decodeImage(file);
   const w0 = im.width || im.naturalWidth, h0 = im.height || im.naturalHeight;
-  const k = Math.min(1, 1600 / Math.max(w0, h0));
+  const k = Math.min(1, 1280 / Math.max(w0, h0));
   const cv = document.createElement('canvas');
   cv.width = Math.max(1, Math.round(w0 * k)); cv.height = Math.max(1, Math.round(h0 * k));
   cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height);
-  const blob = await canvasToBlob(cv, 'image/jpeg', 0.82);
+  const blob = await canvasToBlob(cv, 'image/jpeg', 0.78);
   const tk = 40 / Math.max(cv.width, cv.height);
   const tc = document.createElement('canvas');
   tc.width = Math.max(1, Math.round(cv.width * tk)); tc.height = Math.max(1, Math.round(cv.height * tk));
@@ -3320,14 +3353,18 @@ function videoInfo(file){
   });
 }
 
-function uploadMedia(blob, mime, toUid, onProgress){
+function randomMid(){
+  const b = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+}
+function uploadMedia(blob, mime, toUid, mid, onProgress){
   return new Promise(async (resolve, reject)=>{
     try{
       const u = firebase.auth().currentUser;
       if(!u) throw new Error('kirilmagan');
       const tok = await u.getIdToken();
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', mediaBase() + '/media?to=' + encodeURIComponent(toUid));
+      xhr.open('POST', mediaBase() + '/media?to=' + encodeURIComponent(toUid) + '&id=' + mid);
       xhr.setRequestHeader('Authorization', 'Bearer ' + tok);
       xhr.setRequestHeader('Content-Type', mime);
       xhr.upload.onprogress = (e)=>{ if(e.lengthComputable) onProgress(e.loaded / e.total); };
@@ -3344,19 +3381,25 @@ function uploadMedia(blob, mime, toUid, onProgress){
   });
 }
 
-let mediaSending = false;
+function setUploadProgress(mid, p){
+  const pct = Math.round(p * 100);
+  uploadPct.set(mid, pct);
+  document.querySelectorAll('.media-prog[data-mid="' + mid + '"]').forEach(el => { el.textContent = '⏳ ' + pct + '%'; });
+}
+function finishUploadUi(mid){
+  uploadingMids.delete(mid); uploadPct.delete(mid);
+  document.querySelectorAll('.media-prog[data-mid="' + mid + '"]').forEach(el => el.remove());
+}
+
 async function sendMediaFile(file){
   const chat = chats.find(c => c.id === activeChatId);
   if(!chat || !file) return;
-  if(mediaSending){ showToast("Avvalgi fayl yuborilmoqda"); return; }
   if(!mediaBase()){ showToast("Server manzili topilmadi"); return; }
   if(!getDb() || !myUid()){ showToast("Avval Google bilan kiring"); return; }
   let mime = guessMime(file);
   const isImg = mime.indexOf('image/') === 0, isVid = mime.indexOf('video/') === 0;
   if(!isImg && !isVid){ showToast("Faqat rasm yoki video yuborish mumkin"); return; }
-  mediaSending = true;
   try{
-    showUploadBar('Tayyorlanmoqda...', 0);
     let blob = file, thumb = '', durLabel = '';
     if(isImg){
       let r;
@@ -3371,18 +3414,29 @@ async function sendMediaFile(file){
     }
     if(!blob || blob.size === 0) throw new Error("fayl bo'sh");
     if(blob.size > MEDIA_MAX) throw new Error("fayl 20 MB dan oshmasin");
-    const mid = await uploadMedia(blob, mime, chat.peerUid, p => showUploadBar('Yuborilmoqda... ' + Math.round(p * 100) + '%', p));
+
+    // 1) Xabar suhbatda DARHOL ko'rinadi (lokal nusxa bilan), yuklash esa fonda ketadi
+    const mid = randomMid();
     mediaCache.set(mid, URL.createObjectURL(blob));
+    uploadingMids.add(mid); uploadPct.set(mid, 0);
     const payload = { type: isImg ? 'image' : 'video', mid: mid, mime: mime };
     if(thumb && thumb.length <= 20000) payload.thumb = thumb;
     if(durLabel) payload.duration = durLabel;
-    hideUploadBar();
-    await sendToFirestore(chat, payload);
+    const ref = await sendToFirestore(chat, payload, true);
+    if(!ref){ finishUploadUi(mid); mediaCache.delete(mid); return; }
+
+    // 2) Fayl serverga yuklanadi; xato bo'lsa xabar o'chiriladi
+    uploadMedia(blob, mime, chat.peerUid, mid, p => setUploadProgress(mid, p)).then(()=>{
+      finishUploadUi(mid);
+    }).catch(e=>{
+      finishUploadUi(mid);
+      mediaCache.delete(mid);
+      try{ ref.delete(); }catch(e2){}
+      showToast("Yuborib bo'lmadi: " + String((e && e.message) || e).slice(0, 70));
+    });
   }catch(e){
-    hideUploadBar();
     showToast("Yuborib bo'lmadi: " + String((e && e.message) || e).slice(0, 70));
   }
-  mediaSending = false;
 }
 
 document.getElementById('attach-btn').addEventListener('click', ()=>{
@@ -3499,7 +3553,7 @@ function chatSig(chat){ return chat.id + '|' + chat.messages.map(m => m.id + (m.
 
 const AUDIO_OK = /^data:audio\/[a-z0-9.+-]+(;[a-z0-9=.+-]+)*;base64,[A-Za-z0-9+\/=]+$/i;
 
-async function sendToFirestore(chat, payload){
+async function sendToFirestore(chat, payload, noWait){
   const db = getDb(), uid = myUid();
   if(!db || !uid || !chat || !chat.peerUid){ showToast("Xabar yuborish uchun Google bilan kiring va internetga ulaning"); return false; }
   const now = Date.now();
@@ -3507,9 +3561,16 @@ async function sendToFirestore(chat, payload){
     participants: [uid, chat.peerUid].sort(), from: uid, to: chat.peerUid,
     createdAt: now, expireAt: new Date(now + MSG_TTL), read: false
   }, payload);
+  const pushText = payload.type === 'voice' ? '🎤 Ovozli xabar' : payload.type === 'image' ? '📷 Rasm' : payload.type === 'video' ? '🎥 Video' : payload.text;
+  const ref = db.collection('messages').doc();
+  if(noWait){
+    // Xabar darhol ko'rinadi (lokal), server tasdig'i orqada keladi
+    ref.set(doc).then(()=> notifyPeer(chat.peerUid, 'msg', pushText)).catch(e=> showToast(dbErrorHelp(e && e.code)));
+    return ref;
+  }
   try{
-    await db.collection('messages').add(doc);
-    notifyPeer(chat.peerUid, 'msg', payload.type === 'voice' ? '🎤 Ovozli xabar' : payload.type === 'image' ? '📷 Rasm' : payload.type === 'video' ? '🎥 Video' : payload.text);
+    await ref.set(doc);
+    notifyPeer(chat.peerUid, 'msg', pushText);
     return true;
   }catch(e){
     showToast(dbErrorHelp(e && e.code));

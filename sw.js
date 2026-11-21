@@ -1,4 +1,4 @@
-const CACHE_NAME = "mchat-cache-v5";
+const CACHE_NAME = "mchat-cache-v6";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./icon-180.png", "./icon-32.png", "./icon-16.png"];
 
 self.addEventListener("install", (event) => {
@@ -57,6 +57,8 @@ self.addEventListener("push", (event) => {
       tag: isCall ? "mchat-call" : "mchat-msg-" + (d.from || ""),
       renotify: true,
       requireInteraction: isCall,
+      silent: false,
+      actions: isCall ? [{ action: "accept", title: "📞 Qabul qilish" }, { action: "decline", title: "Rad etish" }] : [],
       vibrate: isCall ? [500, 250, 500, 250, 500, 250, 500] : [200, 100, 200],
       data: { kind: d.kind, from: d.from }
     });
@@ -65,6 +67,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  if (event.action === "decline") return;
   event.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const w of wins) {
