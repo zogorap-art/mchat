@@ -3349,7 +3349,7 @@ async function sendMediaFile(file){
   const chat = chats.find(c => c.id === activeChatId);
   if(!chat || !file) return;
   if(mediaSending){ showToast("Avvalgi fayl yuborilmoqda"); return; }
-  if(!mediaBase()){ showToast("Rasm yuborish serveri sozlanmagan (pushUrl va KV)"); return; }
+  if(!mediaBase()){ showToast("Server manzili topilmadi"); return; }
   if(!getDb() || !myUid()){ showToast("Avval Google bilan kiring"); return; }
   let mime = guessMime(file);
   const isImg = mime.indexOf('image/') === 0, isVid = mime.indexOf('video/') === 0;
@@ -3397,7 +3397,8 @@ document.getElementById('media-input').addEventListener('change', (e)=>{
 
 /* ================= PUSH BILDIRISHNOMALAR (telefon bloklangan/ilova yopiq bo'lganda) ================= */
 const VAPID_PUBLIC = 'BC6XFcatino1ZOBW4Pwiq7zQVtXJGNOh81TCNXS_eWrOPuNQGXy-P3MZAWw60b3aCUCEsebY3ckjQwyXnzLCdmY';
-let pushWorkerUrl = localStorage.getItem('mchat_push_url') || '';
+const DEFAULT_PUSH_URL = 'https://m-chat.zogorap.workers.dev';
+let pushWorkerUrl = localStorage.getItem('mchat_push_url') || DEFAULT_PUSH_URL;
 
 function urlB64ToUint8(b64){
   const pad = '='.repeat((4 - b64.length % 4) % 4);
