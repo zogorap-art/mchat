@@ -3245,6 +3245,53 @@ async function loadMediaFromWorker(mid){
   const err = new Error(why); err.status = r.status; throw err;
 }
 
+const VIDEO_MIMES = ['video/webm', 'video/mp4', 'video/quicktime', 'video/3gpp'];
+const MAX_VIDEO_BYTES = 5 * 1024 * 1024;     // siqilgan video 5 MB gacha
+const VIDEO_CHUNK = 600 * 1024;              // bitta hujjatda ~600 KB
+
+async function getChunkRetry(db, id){
+  let lastErr = '';
+  for(let a = 0; a < 6; a++){
+    try{
+      const sn = await db.collection('media').doc(id).get();
+      if(sn.exists) return sn.data();
+      lastErr = 'topilmadi';
+    }catch(e){
+      const err = new Error((e && e.code === 'permission-denied') ? "ruxsat yo'q (Firebase Rules yangilanmagan)" : String(e && (e.code || e.message) || e).slice(0, 40));
+      err.fatal = true; throw err;
+    }
+    await new Promise(res => setTimeout(res, 1200));
+  }
+  const err = new Error(lastErr); err.notFound = true; throw err;
+}
+async function loadVideoFromFirestore(mid, onProg){
+  const db = getDb();
+  if(!db) throw new Error('baza yo\'q');
+  const first = await getChunkRetry(db, mid + '-0');
+  const total = Number(first.total) || 1;
+  if(total < 1 || total > 12) throw new Error('buzilgan fayl');
+  const mime = VIDEO_MIMES.indexOf(first.mime) >= 0 ? first.mime : 'video/webm';
+  const parts = new Array(total);
+  parts[0] = first.data;
+  let got = 1;
+  if(onProg) onProg(got, total);
+  const idxs = [];
+  for(let i = 1; i < total; i++) idxs.push(i);
+  await Promise.all(idxs.map(async i=>{
+    const d = await getChunkRetry(db, mid + '-' + i);
+    parts[i] = d.data; got++;
+    if(onProg) onProg(got, total);
+  }));
+  const bytes = parts.map(b64 => {
+    if(typeof b64 !== 'string') throw new Error('buzilgan fayl');
+    const bin = atob(b64);
+    const u = new Uint8Array(bin.length);
+    for(let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  });
+  return URL.createObjectURL(new Blob(bytes, { type: mime }));
+}
+
 async function loadMedia(mid, kind){
   if(mediaCache.has(mid)) return mediaCache.get(mid);
   if(mediaLoading.has(mid) || mediaGone.has(mid)) return null;
@@ -3281,19 +3328,28 @@ async function loadMedia(mid, kind){
       }
       return mediaCache.get(mid) || null;
     }
-    // 2) Video: Cloudflare orqali
-    for(let attempt = 0; attempt < 14; attempt++){
-      try{
-        const url = await loadMediaFromWorker(mid);
-        mediaCache.set(mid, url);
-        return url;
-      }catch(e){
-        if(e && e.status === 404 && attempt < 13){ await new Promise(res => setTimeout(res, 1200)); continue; }
-        if(e && e.status === 404) mediaGone.add(mid); else mediaErr.set(mid, String(e && e.message || e));
-        break;
+    // 2) Video: Firestore bo'laklaridan (chat ishlaydigan joyda ishlaydi)
+    try{
+      const url = await loadVideoFromFirestore(mid, (g, t)=>{
+        document.querySelectorAll('.media-vid-ph[data-mid="' + mid + '"] .media-play').forEach(el => { el.textContent = g + '/' + t; el.style.fontSize = '14px'; });
+      });
+      mediaCache.set(mid, url);
+      return url;
+    }catch(e){
+      if(e && e.notFound){
+        // eski usulda (Cloudflare) yuborilgan bo'lishi mumkin
+        try{
+          const url = await loadMediaFromWorker(mid);
+          mediaCache.set(mid, url);
+          return url;
+        }catch(e2){
+          if(e2 && e2.status === 404) mediaGone.add(mid); else mediaErr.set(mid, String(e2 && e2.message || e2));
+        }
+      }else{
+        mediaErr.set(mid, String(e && e.message || e));
       }
     }
-  }catch(e){ mediaErr.set(mid, String(e && e.message || e).slice(0, 40)); }
+    }catch(e){ mediaErr.set(mid, String(e && e.message || e).slice(0, 40)); }
   finally{ mediaLoading.delete(mid); }
   return null;
 }
@@ -3458,6 +3514,126 @@ async function sendImageViaFirestore(chat, file){
   });
 }
 
+function showVidProg(text){
+  let el = document.getElementById('vid-prog');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'vid-prog';
+    el.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:60;background:#075E54;color:#fff;border-radius:12px;padding:10px 14px;font-size:13px;';
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.style.display = 'block';
+}
+function hideVidProg(){ const el = document.getElementById('vid-prog'); if(el) el.style.display = 'none'; }
+
+// Videoni kichraytiradi (480p, ~650 kbit/s, webm) — haqiqiy vaqtda yozib oladi
+function transcodeVideo(file, onProgress){
+  return new Promise((resolve, reject)=>{
+    if(!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream){ reject(new Error("brauzer videoni siqishni qo'llamaydi")); return; }
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.src = url; v.playsInline = true; v.preload = 'auto';
+    let ac = null, rec = null, raf = 0, tm = 0, done = false;
+    const cleanup = ()=>{
+      done = true; cancelAnimationFrame(raf); clearTimeout(tm);
+      try{ if(ac) ac.close(); }catch(e){}
+      try{ v.pause(); }catch(e){}
+      URL.revokeObjectURL(url);
+    };
+    const fail = (m)=>{ if(done) return; try{ if(rec && rec.state !== 'inactive') rec.stop(); }catch(e){} cleanup(); reject(new Error(m)); };
+    v.onerror = ()=> fail('video ochilmadi');
+    v.onloadedmetadata = async ()=>{
+      try{
+        const dur = v.duration;
+        if(!isFinite(dur) || dur <= 0) return fail("davomiyligi noma'lum");
+        if(dur > 75) return fail('video 75 soniyadan oshmasin');
+        const vw = v.videoWidth || 640, vh = v.videoHeight || 360;
+        const k = Math.min(1, 480 / Math.min(vw, vh));
+        const cw = Math.max(2, Math.round(vw * k / 2) * 2), ch = Math.max(2, Math.round(vh * k / 2) * 2);
+        const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+        const cx = cv.getContext('2d');
+        const vstream = cv.captureStream(24);
+        const AC = window.AudioContext || window.webkitAudioContext;
+        ac = new AC();
+        try{ await ac.resume(); }catch(e){}
+        const tracks = vstream.getVideoTracks().slice();
+        try{
+          const src = ac.createMediaElementSource(v);
+          const dest = ac.createMediaStreamDestination();
+          src.connect(dest);          // ovoz dinamikka chiqmaydi, faqat yozib olinadi
+          dest.stream.getAudioTracks().forEach(t => tracks.push(t));
+        }catch(e){}
+        const stream = new MediaStream(tracks);
+        const mt = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m));
+        if(!mt) return fail("webm qo'llanmaydi");
+        rec = new MediaRecorder(stream, { mimeType: mt, videoBitsPerSecond: 650000, audioBitsPerSecond: 64000 });
+        const chunks = [];
+        rec.ondataavailable = (e)=>{ if(e.data && e.data.size) chunks.push(e.data); };
+        rec.onstop = ()=>{ if(done) return; const blob = new Blob(chunks, { type: 'video/webm' }); cleanup(); resolve(blob); };
+        rec.onerror = ()=> fail("yozib bo'lmadi");
+        v.onended = ()=>{ try{ if(rec.state !== 'inactive') rec.stop(); }catch(e){} };
+        tm = setTimeout(()=> fail('vaqt tugadi'), dur * 1000 * 2.5 + 10000);
+        rec.start(500);
+        await v.play();
+        const draw = ()=>{
+          if(done) return;
+          cx.drawImage(v, 0, 0, cw, ch);
+          if(onProgress) onProgress(Math.min(1, v.currentTime / dur));
+          raf = requestAnimationFrame(draw);
+        };
+        draw();
+      }catch(e){ fail(String((e && e.message) || e)); }
+    };
+  });
+}
+
+async function sendVideoViaFirestore(chat, file){
+  const db = getDb(), uid = myUid();
+  if(file.size > 80 * 1024 * 1024) throw new Error('video 80 MB dan oshmasin');
+  const vi = await videoInfo(file);
+  const d = Math.round(vi.duration || 0);
+  const durLabel = d ? (Math.floor(d / 60) + ':' + pad2(d % 60)) : '';
+  let blob = file, mime = guessMime(file);
+  showVidProg('Video tayyorlanmoqda... 0%');
+  try{
+    blob = await transcodeVideo(file, p => showVidProg('Video tayyorlanmoqda... ' + Math.round(p * 100) + '%'));
+    mime = 'video/webm';
+  }catch(e){
+    // siqib bo'lmasa, kichik bo'lsa asl faylni yuboramiz
+    if(file.size <= MAX_VIDEO_BYTES && VIDEO_MIMES.indexOf(mime) >= 0){ blob = file; }
+    else{ hideVidProg(); throw new Error(e && e.message ? e.message : "video siqib bo'lmadi"); }
+  }
+  hideVidProg();
+  if(blob.size > MAX_VIDEO_BYTES) throw new Error('video juda katta (siqilgandan keyin ham 5 MB dan oshdi)');
+  const total = Math.ceil(blob.size / VIDEO_CHUNK);
+  const mid = randomMid();
+  const now = Date.now();
+  const parts = [uid, chat.peerUid].sort();
+  const exp = new Date(now + MSG_TTL);
+  const batch = db.batch();
+  for(let i = 0; i < total; i++){
+    const du = await blobToDataUrl(blob.slice(i * VIDEO_CHUNK, (i + 1) * VIDEO_CHUNK));
+    const b64 = du.slice(du.indexOf(',') + 1);
+    batch.set(db.collection('media').doc(mid + '-' + i), { participants: parts, from: uid, to: chat.peerUid, data: b64, mime: mime, idx: i, total: total, createdAt: now, expireAt: exp });
+  }
+  const msg = { participants: parts, from: uid, to: chat.peerUid, createdAt: now, expireAt: exp, read: false, type: 'video', mid: mid, mime: mime };
+  if(vi.thumb && vi.thumb.length <= 20000) msg.thumb = vi.thumb;
+  if(durLabel) msg.duration = durLabel;
+  batch.set(db.collection('messages').doc(), msg);
+  mediaCache.set(mid, URL.createObjectURL(blob));
+  uploadingMids.add(mid); uploadPct.set(mid, 0);
+  batch.commit().then(()=>{
+    finishUploadUi(mid);
+    notifyPeer(chat.peerUid, 'msg', '🎥 Video');
+  }).catch(e=>{
+    finishUploadUi(mid);
+    mediaCache.delete(mid);
+    const why = (e && e.code === 'permission-denied') ? "Firebase Rules yangilanmagan" : String((e && (e.code || e.message)) || e).slice(0, 60);
+    showToast("Yuborib bo'lmadi: " + why);
+  });
+}
+
 function videoInfo(file){
   return new Promise(resolve=>{
     const v = document.createElement('video');
@@ -3521,45 +3697,15 @@ function finishUploadUi(mid){
 async function sendMediaFile(file){
   const chat = chats.find(c => c.id === activeChatId);
   if(!chat || !file) return;
-  if(!mediaBase()){ showToast("Server manzili topilmadi"); return; }
   if(!getDb() || !myUid()){ showToast("Avval Google bilan kiring"); return; }
-  let mime = guessMime(file);
+  const mime = guessMime(file);
   const isImg = mime.indexOf('image/') === 0, isVid = mime.indexOf('video/') === 0;
   if(!isImg && !isVid){ showToast("Faqat rasm yoki video yuborish mumkin"); return; }
   try{
-    if(isImg){ await sendImageViaFirestore(chat, file); return; }
-    let blob = file, thumb = '', durLabel = '';
-    if(false){
-    }else{
-      if(file.size > MEDIA_MAX) throw new Error("video 20 MB dan oshmasin");
-      const vi = await videoInfo(file);
-      thumb = vi.thumb;
-      const d = Math.round(vi.duration || 0);
-      durLabel = d ? (Math.floor(d / 60) + ':' + pad2(d % 60)) : '';
-    }
-    if(!blob || blob.size === 0) throw new Error("fayl bo'sh");
-    if(blob.size > MEDIA_MAX) throw new Error("fayl 20 MB dan oshmasin");
-
-    // 1) Xabar suhbatda DARHOL ko'rinadi (lokal nusxa bilan), yuklash esa fonda ketadi
-    const mid = randomMid();
-    mediaCache.set(mid, URL.createObjectURL(blob));
-    uploadingMids.add(mid); uploadPct.set(mid, 0);
-    const payload = { type: isImg ? 'image' : 'video', mid: mid, mime: mime };
-    if(thumb && thumb.length <= 20000) payload.thumb = thumb;
-    if(durLabel) payload.duration = durLabel;
-    const ref = await sendToFirestore(chat, payload, true);
-    if(!ref){ finishUploadUi(mid); mediaCache.delete(mid); return; }
-
-    // 2) Fayl serverga yuklanadi; xato bo'lsa xabar o'chiriladi
-    uploadMedia(blob, mime, chat.peerUid, mid, p => setUploadProgress(mid, p)).then(()=>{
-      finishUploadUi(mid);
-    }).catch(e=>{
-      finishUploadUi(mid);
-      mediaCache.delete(mid);
-      try{ ref.delete(); }catch(e2){}
-      showToast("Yuborib bo'lmadi: " + String((e && e.message) || e).slice(0, 70));
-    });
+    if(isImg) await sendImageViaFirestore(chat, file);
+    else await sendVideoViaFirestore(chat, file);
   }catch(e){
+    hideVidProg();
     showToast("Yuborib bo'lmadi: " + String((e && e.message) || e).slice(0, 70));
   }
 }
@@ -3731,7 +3877,7 @@ function rebuildFromStore(){
   const byPeer = {};
   const expired = [];
   msgStore.forEach(m=>{
-    if(!m.createdAt || m.createdAt < cutoff){ expired.push(m.id); if(m.type === 'image' && typeof m.mid === 'string' && MID_OK.test(m.mid) && getDb()) getDb().collection('media').doc(m.mid).delete().catch(()=>{}); return; }
+    if(!m.createdAt || m.createdAt < cutoff){ expired.push(m.id); if(typeof m.mid === 'string' && MID_OK.test(m.mid) && getDb()){ if(m.type === 'image') getDb().collection('media').doc(m.mid).delete().catch(()=>{}); else if(m.type === 'video'){ for(let i = 0; i < 12; i++) getDb().collection('media').doc(m.mid + '-' + i).delete().catch(()=>{}); } } return; }
     const p = (m.from === uid) ? m.to : m.from;
     if(typeof p !== 'string') return;
     (byPeer[p] = byPeer[p] || []).push(m);
