@@ -630,6 +630,10 @@ if ('serviceWorker' in navigator) {
   .call-overlay.local-on .call-local{ display:block; }
   /* old kamera oynasi ko'zguday ko'rinadi (o'zingizni ko'zguda ko'rgandek) */
   .call-local.mirror{ transform:scaleX(-1); }
+  /* Kiruvchi qo'ng'iroq: ism va holat rasm ostida, o'rtada */
+  .call-overlay.incoming .call-top{ top:calc(38% + 128px); bottom:auto; padding:0 24px; text-align:center; background:none; }
+  .call-overlay.incoming .call-top .call-name{ font-size:30px; }
+  .call-overlay.incoming .call-top .call-status{ font-size:16px; margin-top:8px; }
   .call-incoming{
     position:absolute; left:0; right:0; bottom:calc(46px + env(safe-area-inset-bottom));
     display:none; justify-content:space-around; z-index:4;

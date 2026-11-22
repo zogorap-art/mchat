@@ -1,4 +1,4 @@
-const CACHE_NAME = "mchat-cache-v6";
+const CACHE_NAME = "mchat-cache-v7";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./icon-180.png", "./icon-32.png", "./icon-16.png"];
 
 self.addEventListener("install", (event) => {
@@ -50,7 +50,7 @@ self.addEventListener("push", (event) => {
     if (visible) return;
 
     const isCall = d.kind === "call";
-    return self.registration.showNotification(d.title || "M-CHAT", {
+    return self.registration.showNotification(isCall ? "📞 " + (d.title || "M-CHAT") : (d.title || "M-CHAT"), {
       body: d.body || "",
       icon: "icon-192.png",
       badge: "icon-192.png",
