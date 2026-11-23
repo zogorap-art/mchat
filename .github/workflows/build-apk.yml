@@ -1,0 +1,776 @@
+# M-CHAT Android ilovasini (APK) GitHub'da avtomatik yig'adi.
+# Joylashuvi: .github/workflows/build-apk.yml
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodni olish
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android loyihasini yaratish
+        run: |
+          set -e
+          mkdir -p android android/app android/app/src/main android/app/src/main/java/uz/mchat/app android/app/src/main/res/drawable android/app/src/main/res/values
+          cat > 'android/app/build.gradle' <<'MCHAT_EOF_0'
+          plugins {
+              id 'com.android.application'
+              id 'com.google.gms.google-services'
+          }
+
+          android {
+              namespace 'uz.mchat.app'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId 'uz.mchat.app'
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.7.0'
+              implementation 'androidx.core:core:1.13.1'
+              implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+              implementation platform('com.google.firebase:firebase-bom:33.1.2')
+              implementation 'com.google.firebase:firebase-messaging'
+          }
+          MCHAT_EOF_0
+          cat > 'android/app/src/main/AndroidManifest.xml' <<'MCHAT_EOF_1'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@drawable/ic_launcher"
+                  android:label="M-CHAT"
+                  android:theme="@style/AppTheme">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:label="M-CHAT">
+                      <meta-data
+                          android:name="android.support.customtabs.trusted.DEFAULT_URL"
+                          android:value="https://zogorap-art.github.io/mchat/" />
+                      <meta-data
+                          android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR"
+                          android:resource="@color/brand" />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <activity
+                      android:name=".IncomingCallActivity"
+                      android:exported="false"
+                      android:excludeFromRecents="true"
+                      android:launchMode="singleTask"
+                      android:showWhenLocked="true"
+                      android:turnScreenOn="true"
+                      android:theme="@style/CallTheme" />
+
+                  <receiver
+                      android:name=".CallActionReceiver"
+                      android:exported="false" />
+
+                  <service
+                      android:name=".MChatMessagingService"
+                      android:exported="false">
+                      <intent-filter>
+                          <action android:name="com.google.firebase.MESSAGING_EVENT" />
+                      </intent-filter>
+                  </service>
+              </application>
+          </manifest>
+          MCHAT_EOF_1
+          cat > 'android/app/src/main/java/uz/mchat/app/CallActionReceiver.java' <<'MCHAT_EOF_2'
+          package uz.mchat.app;
+
+          import android.app.NotificationManager;
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+
+          public class CallActionReceiver extends BroadcastReceiver {
+              @Override
+              public void onReceive(Context context, Intent intent) {
+                  NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+                  if (nm != null) {
+                      nm.cancel(MChatMessagingService.ID_CALL);
+                  }
+                  Intent end = new Intent(IncomingCallActivity.ACTION_END);
+                  end.setPackage(context.getPackageName());
+                  context.sendBroadcast(end);
+              }
+          }
+          MCHAT_EOF_2
+          cat > 'android/app/src/main/java/uz/mchat/app/IncomingCallActivity.java' <<'MCHAT_EOF_3'
+          package uz.mchat.app;
+
+          import android.app.Activity;
+          import android.app.KeyguardManager;
+          import android.app.NotificationManager;
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.IntentFilter;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.view.WindowManager;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          public class IncomingCallActivity extends Activity {
+
+              static final String ACTION_END = "uz.mchat.app.CALL_END";
+
+              private final Handler handler = new Handler(Looper.getMainLooper());
+              private BroadcastReceiver endReceiver;
+
+              private int dp(int v) {
+                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+              }
+
+              private TextView roundButton(String symbol, int color) {
+                  TextView t = new TextView(this);
+                  t.setText(symbol);
+                  t.setTextSize(28);
+                  t.setTextColor(Color.WHITE);
+                  t.setGravity(Gravity.CENTER);
+                  GradientDrawable bg = new GradientDrawable();
+                  bg.setShape(GradientDrawable.OVAL);
+                  bg.setColor(color);
+                  t.setBackground(bg);
+                  return t;
+              }
+
+              private LinearLayout buttonColumn(TextView round, String label) {
+                  LinearLayout col = new LinearLayout(this);
+                  col.setOrientation(LinearLayout.VERTICAL);
+                  col.setGravity(Gravity.CENTER_HORIZONTAL);
+                  LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(dp(72), dp(72));
+                  col.addView(round, rp);
+                  TextView lab = new TextView(this);
+                  lab.setText(label);
+                  lab.setTextColor(Color.WHITE);
+                  lab.setTextSize(14);
+                  lab.setGravity(Gravity.CENTER);
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  lp.topMargin = dp(10);
+                  col.addView(lab, lp);
+                  return col;
+              }
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  if (Build.VERSION.SDK_INT >= 27) {
+                      setShowWhenLocked(true);
+                      setTurnScreenOn(true);
+                  } else {
+                      getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                              | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                              | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+                  }
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+                  String name = getIntent().getStringExtra("name");
+                  if (name == null || name.length() == 0) {
+                      name = "M-CHAT";
+                  }
+                  boolean video = getIntent().getBooleanExtra("video", false);
+
+                  FrameLayout root = new FrameLayout(this);
+                  root.setBackgroundColor(Color.parseColor("#1C1C1E"));
+
+                  LinearLayout center = new LinearLayout(this);
+                  center.setOrientation(LinearLayout.VERTICAL);
+                  center.setGravity(Gravity.CENTER_HORIZONTAL);
+
+                  TextView avatar = new TextView(this);
+                  avatar.setText(name.substring(0, 1).toUpperCase());
+                  avatar.setTextSize(72);
+                  avatar.setTypeface(Typeface.DEFAULT_BOLD);
+                  avatar.setTextColor(Color.WHITE);
+                  avatar.setGravity(Gravity.CENTER);
+                  GradientDrawable abg = new GradientDrawable();
+                  abg.setShape(GradientDrawable.OVAL);
+                  abg.setColor(Color.parseColor("#4C9A2A"));
+                  avatar.setBackground(abg);
+                  center.addView(avatar, new LinearLayout.LayoutParams(dp(180), dp(180)));
+
+                  TextView nameView = new TextView(this);
+                  nameView.setText(name);
+                  nameView.setTextColor(Color.WHITE);
+                  nameView.setTextSize(30);
+                  nameView.setTypeface(Typeface.DEFAULT_BOLD);
+                  nameView.setGravity(Gravity.CENTER);
+                  LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  np.topMargin = dp(28);
+                  center.addView(nameView, np);
+
+                  TextView status = new TextView(this);
+                  status.setText(video ? "Kiruvchi video qo'ng'iroq..." : "Kiruvchi ovozli qo'ng'iroq...");
+                  status.setTextColor(Color.parseColor("#CCFFFFFF"));
+                  status.setTextSize(16);
+                  status.setGravity(Gravity.CENTER);
+                  LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  sp.topMargin = dp(8);
+                  center.addView(status, sp);
+
+                  FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+                  cp.bottomMargin = dp(60);
+                  root.addView(center, cp);
+
+                  LinearLayout row = new LinearLayout(this);
+                  row.setOrientation(LinearLayout.HORIZONTAL);
+                  row.setGravity(Gravity.CENTER);
+                  row.setWeightSum(2f);
+
+                  TextView decline = roundButton("\u2715", Color.parseColor("#EA4335"));
+                  TextView accept = roundButton("\u260E", Color.parseColor("#25D366"));
+                  LinearLayout declineCol = buttonColumn(decline, "Rad etish");
+                  LinearLayout acceptCol = buttonColumn(accept, "Qabul qilish");
+                  row.addView(declineCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                  row.addView(acceptCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                  FrameLayout.LayoutParams rp = new FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                          Gravity.BOTTOM);
+                  rp.bottomMargin = dp(56);
+                  root.addView(row, rp);
+
+                  setContentView(root);
+
+                  decline.setOnClickListener(new View.OnClickListener() {
+                      @Override
+                      public void onClick(View v) {
+                          cancelNotification();
+                          finish();
+                      }
+                  });
+                  accept.setOnClickListener(new View.OnClickListener() {
+                      @Override
+                      public void onClick(View v) {
+                          acceptCall();
+                      }
+                  });
+
+                  endReceiver = new BroadcastReceiver() {
+                      @Override
+                      public void onReceive(Context context, Intent intent) {
+                          finish();
+                      }
+                  };
+                  IntentFilter f = new IntentFilter(ACTION_END);
+                  if (Build.VERSION.SDK_INT >= 33) {
+                      registerReceiver(endReceiver, f, Context.RECEIVER_NOT_EXPORTED);
+                  } else {
+                      registerReceiver(endReceiver, f);
+                  }
+
+                  handler.postDelayed(new Runnable() {
+                      @Override
+                      public void run() {
+                          cancelNotification();
+                          finish();
+                      }
+                  }, 45000);
+              }
+
+              private void cancelNotification() {
+                  NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                  if (nm != null) {
+                      nm.cancel(MChatMessagingService.ID_CALL);
+                  }
+              }
+
+              private void launchApp() {
+                  Intent i = new Intent(this, MainActivity.class);
+                  i.putExtra("accept", true);
+                  i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                  startActivity(i);
+                  finish();
+              }
+
+              private void acceptCall() {
+                  cancelNotification();
+                  if (Build.VERSION.SDK_INT >= 26) {
+                      KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+                      if (km != null && km.isKeyguardLocked()) {
+                          km.requestDismissKeyguard(this, new KeyguardManager.KeyguardDismissCallback() {
+                              @Override
+                              public void onDismissSucceeded() {
+                                  launchApp();
+                              }
+
+                              @Override
+                              public void onDismissCancelled() {
+                                  // foydalanuvchi ekranni ochmadi
+                              }
+
+                              @Override
+                              public void onDismissError() {
+                                  launchApp();
+                              }
+                          });
+                          return;
+                      }
+                  }
+                  launchApp();
+              }
+
+              @Override
+              protected void onDestroy() {
+                  handler.removeCallbacksAndMessages(null);
+                  if (endReceiver != null) {
+                      try {
+                          unregisterReceiver(endReceiver);
+                      } catch (Exception e) {
+                          // ignore
+                      }
+                  }
+                  super.onDestroy();
+              }
+          }
+          MCHAT_EOF_3
+          cat > 'android/app/src/main/java/uz/mchat/app/MChatMessagingService.java' <<'MCHAT_EOF_4'
+          package uz.mchat.app;
+
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.media.AudioAttributes;
+          import android.media.RingtoneManager;
+          import android.net.Uri;
+          import android.os.Build;
+
+          import androidx.core.app.NotificationCompat;
+
+          import com.google.firebase.messaging.FirebaseMessagingService;
+          import com.google.firebase.messaging.RemoteMessage;
+
+          import java.util.Map;
+
+          public class MChatMessagingService extends FirebaseMessagingService {
+
+              static final String CH_CALLS = "mchat_calls_v1";
+              static final String CH_MSG = "mchat_msgs_v1";
+              static final int ID_CALL = 1001;
+
+              @Override
+              public void onNewToken(String token) {
+                  getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE).edit().putString("fcm", token).apply();
+              }
+
+              @Override
+              public void onMessageReceived(RemoteMessage message) {
+                  Map<String, String> d = message.getData();
+                  String kind = d.get("kind");
+                  String title = d.get("title");
+                  String body = d.get("body");
+                  if (title == null || title.length() == 0) {
+                      title = "M-CHAT";
+                  }
+                  createChannels(this);
+                  if ("call".equals(kind)) {
+                      showCall(title, "1".equals(d.get("video")));
+                  } else if ("callend".equals(kind)) {
+                      endCall(title);
+                  } else {
+                      showMessage(title, body == null ? "" : body, d.get("from"));
+                  }
+              }
+
+              static void createChannels(Context ctx) {
+                  if (Build.VERSION.SDK_INT < 26) {
+                      return;
+                  }
+                  NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+                  if (nm == null) {
+                      return;
+                  }
+                  Uri ring = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+                  AudioAttributes aa = new AudioAttributes.Builder()
+                          .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                          .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                          .build();
+
+                  NotificationChannel calls = new NotificationChannel(CH_CALLS, "Qo'ng'iroqlar", NotificationManager.IMPORTANCE_HIGH);
+                  calls.setDescription("Kiruvchi qo'ng'iroqlar");
+                  calls.setSound(ring, aa);
+                  calls.enableVibration(true);
+                  calls.setVibrationPattern(new long[]{0, 700, 500, 700, 500});
+                  calls.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+                  nm.createNotificationChannel(calls);
+
+                  NotificationChannel msgs = new NotificationChannel(CH_MSG, "Xabarlar", NotificationManager.IMPORTANCE_HIGH);
+                  msgs.setDescription("Yangi xabarlar");
+                  msgs.enableVibration(true);
+                  msgs.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+                  nm.createNotificationChannel(msgs);
+              }
+
+              private int piFlags() {
+                  int f = PendingIntent.FLAG_UPDATE_CURRENT;
+                  if (Build.VERSION.SDK_INT >= 23) {
+                      f |= PendingIntent.FLAG_IMMUTABLE;
+                  }
+                  return f;
+              }
+
+              private void showCall(String title, boolean video) {
+                  Intent full = new Intent(this, IncomingCallActivity.class);
+                  full.putExtra("name", title);
+                  full.putExtra("video", video);
+                  full.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_USER_ACTION);
+                  PendingIntent fullPi = PendingIntent.getActivity(this, 1, full, piFlags());
+
+                  Intent acc = new Intent(this, MainActivity.class);
+                  acc.putExtra("accept", true);
+                  acc.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                  PendingIntent accPi = PendingIntent.getActivity(this, 2, acc, piFlags());
+
+                  Intent dec = new Intent(this, CallActionReceiver.class);
+                  dec.setAction("uz.mchat.app.DECLINE");
+                  PendingIntent decPi = PendingIntent.getBroadcast(this, 3, dec, piFlags());
+
+                  NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CH_CALLS)
+                          .setSmallIcon(R.drawable.ic_stat_call)
+                          .setContentTitle(title)
+                          .setContentText(video ? "Kiruvchi video qo'ng'iroq" : "Kiruvchi ovozli qo'ng'iroq")
+                          .setPriority(NotificationCompat.PRIORITY_MAX)
+                          .setCategory(NotificationCompat.CATEGORY_CALL)
+                          .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                          .setOngoing(true)
+                          .setAutoCancel(false)
+                          .setTimeoutAfter(45000)
+                          .setFullScreenIntent(fullPi, true)
+                          .setContentIntent(fullPi)
+                          .addAction(0, "Rad etish", decPi)
+                          .addAction(0, "Qabul qilish", accPi);
+                  Notification n = nb.build();
+                  n.flags |= Notification.FLAG_INSISTENT;
+                  NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                  if (nm != null) {
+                      nm.notify(ID_CALL, n);
+                  }
+              }
+
+              private void endCall(String title) {
+                  NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                  if (nm != null) {
+                      nm.cancel(ID_CALL);
+                  }
+                  Intent end = new Intent(IncomingCallActivity.ACTION_END);
+                  end.setPackage(getPackageName());
+                  sendBroadcast(end);
+                  showMessage(title, "O'tkazib yuborilgan qo'ng'iroq", "missed");
+              }
+
+              private void showMessage(String title, String body, String from) {
+                  Intent open = new Intent(this, MainActivity.class);
+                  open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                  PendingIntent pi = PendingIntent.getActivity(this, 4, open, piFlags());
+                  NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CH_MSG)
+                          .setSmallIcon(R.drawable.ic_stat_call)
+                          .setContentTitle(title)
+                          .setContentText(body)
+                          .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
+                          .setPriority(NotificationCompat.PRIORITY_HIGH)
+                          .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                          .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                          .setAutoCancel(true)
+                          .setContentIntent(pi);
+                  NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                  if (nm != null) {
+                      int id = (from == null ? "msg" : from).hashCode();
+                      nm.notify(id, nb.build());
+                  }
+              }
+          }
+          MCHAT_EOF_4
+          cat > 'android/app/src/main/java/uz/mchat/app/MainActivity.java' <<'MCHAT_EOF_5'
+          package uz.mchat.app;
+
+          import android.Manifest;
+          import android.app.NotificationManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.content.pm.PackageManager;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.provider.Settings;
+
+          import com.google.android.gms.tasks.OnCompleteListener;
+          import com.google.android.gms.tasks.Task;
+          import com.google.androidbrowserhelper.trusted.LauncherActivity;
+          import com.google.firebase.messaging.FirebaseMessaging;
+
+          public class MainActivity extends LauncherActivity {
+
+              static final String PREFS = "mchat";
+              private static final int REQ_NOTIF = 77;
+
+              private final Handler handler = new Handler(Looper.getMainLooper());
+              private boolean notifAsked = false;
+              private boolean waitingSettings = false;
+              private boolean launching = false;
+              private boolean twaStarted = false;
+
+              @Override
+              protected boolean shouldLaunchImmediately() {
+                  return false;
+              }
+
+              @Override
+              protected Uri getLaunchingUrl() {
+                  Uri base = super.getLaunchingUrl();
+                  Uri.Builder b = base.buildUpon();
+                  b.appendQueryParameter("src", "apk");
+                  SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+                  String token = sp.getString("fcm", null);
+                  if (token != null && token.length() > 0) {
+                      b.appendQueryParameter("fcm", token);
+                  }
+                  if (getIntent() != null && getIntent().getBooleanExtra("accept", false)) {
+                      b.appendQueryParameter("accept", "1");
+                  }
+                  return b.build();
+              }
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  proceed();
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  if (waitingSettings) {
+                      waitingSettings = false;
+                      proceed();
+                  }
+              }
+
+              private void proceed() {
+                  if (launching) {
+                      return;
+                  }
+                  if (Build.VERSION.SDK_INT >= 33 && !notifAsked
+                          && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                      notifAsked = true;
+                      requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIF);
+                      return;
+                  }
+                  SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+                  if (Build.VERSION.SDK_INT >= 34) {
+                      NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                      if (nm != null && !nm.canUseFullScreenIntent() && !sp.getBoolean("fsiAsked", false)) {
+                          sp.edit().putBoolean("fsiAsked", true).apply();
+                          try {
+                              waitingSettings = true;
+                              startActivity(new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                                      Uri.parse("package:" + getPackageName())));
+                              return;
+                          } catch (Exception e) {
+                              waitingSettings = false;
+                          }
+                      }
+                  }
+                  launching = true;
+                  fetchTokenAndLaunch();
+              }
+
+              @Override
+              public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+                  if (requestCode == REQ_NOTIF) {
+                      proceed();
+                  }
+              }
+
+              private void startTwaOnce() {
+                  if (twaStarted) {
+                      return;
+                  }
+                  twaStarted = true;
+                  launchTwa();
+              }
+
+              private void fetchTokenAndLaunch() {
+                  handler.postDelayed(new Runnable() {
+                      @Override
+                      public void run() {
+                          startTwaOnce();
+                      }
+                  }, 4000);
+                  try {
+                      FirebaseMessaging.getInstance().getToken().addOnCompleteListener(new OnCompleteListener<String>() {
+                          @Override
+                          public void onComplete(Task<String> task) {
+                              if (task.isSuccessful() && task.getResult() != null) {
+                                  getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("fcm", task.getResult()).apply();
+                              }
+                              startTwaOnce();
+                          }
+                      });
+                  } catch (Exception e) {
+                      startTwaOnce();
+                  }
+              }
+          }
+          MCHAT_EOF_5
+          cat > 'android/app/src/main/res/drawable/ic_stat_call.xml' <<'MCHAT_EOF_6'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FFFFFFFF"
+                  android:pathData="M6.62,10.79c1.44,2.83 3.76,5.14 6.59,6.59l2.2,-2.2c0.27,-0.27 0.67,-0.36 1.02,-0.24 1.12,0.37 2.33,0.57 3.57,0.57 0.55,0 1,0.45 1,1V20c0,0.55 -0.45,1 -1,1 -9.39,0 -17,-7.61 -17,-17 0,-0.55 0.45,-1 1,-1h3.5c0.55,0 1,0.45 1,1 0,1.25 0.2,2.45 0.57,3.57 0.11,0.35 0.03,0.74 -0.25,1.02l-2.2,2.2z" />
+          </vector>
+          MCHAT_EOF_6
+          cat > 'android/app/src/main/res/values/colors.xml' <<'MCHAT_EOF_7'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="brand">#075E54</color>
+              <color name="call_bg">#1C1C1E</color>
+          </resources>
+          MCHAT_EOF_7
+          cat > 'android/app/src/main/res/values/styles.xml' <<'MCHAT_EOF_8'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+                  <item name="android:windowBackground">@color/brand</item>
+                  <item name="colorPrimary">@color/brand</item>
+                  <item name="colorPrimaryDark">@color/brand</item>
+              </style>
+              <style name="CallTheme" parent="@android:style/Theme.Material.NoActionBar">
+                  <item name="android:windowBackground">@color/call_bg</item>
+                  <item name="android:statusBarColor">@color/call_bg</item>
+                  <item name="android:navigationBarColor">@color/call_bg</item>
+              </style>
+          </resources>
+          MCHAT_EOF_8
+          cat > 'android/build.gradle' <<'MCHAT_EOF_9'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+              id 'com.google.gms.google-services' version '4.4.2' apply false
+          }
+          MCHAT_EOF_9
+          cat > 'android/gradle.properties' <<'MCHAT_EOF_10'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          MCHAT_EOF_10
+          cat > 'android/settings.gradle' <<'MCHAT_EOF_11'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "mchat"
+          include ':app'
+          MCHAT_EOF_11
+          cp icon-192.png android/app/src/main/res/drawable/ic_launcher.png
+
+      - name: google-services.json ni yozish
+        env:
+          GSJ: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GSJ" ]; then
+            echo "XATO: GOOGLE_SERVICES_JSON secret kiritilmagan"
+            exit 1
+          fi
+          printf '%s' "$GSJ" > android/app/google-services.json
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: APK yig'ish
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: APK ni faylga chiqarish
+        uses: actions/upload-artifact@v4
+        with:
+          name: M-CHAT-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Releases bo'limiga joylash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk M-CHAT.apk
+          gh release delete apk-latest --yes --cleanup-tag || true
+          gh release create apk-latest M-CHAT.apk --title "M-CHAT Android" --notes "M-CHAT Android ilovasi (APK). Telefonga yuklab o'rnating."
