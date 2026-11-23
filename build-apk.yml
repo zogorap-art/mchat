@@ -43,7 +43,23 @@ jobs:
                   versionName '1.0'
               }
 
+              signingConfigs {
+                  mchat {
+                      storeFile file('mchat.p12')
+                      storePassword 'mchat1234'
+                      keyAlias 'mchat'
+                      keyPassword 'mchat1234'
+                      storeType 'pkcs12'
+                  }
+              }
+
               buildTypes {
+                  debug {
+                      // Doimiy imzo (secret'dan olinadi) bo'lsa, shu bilan imzolanadi
+                      if (file('mchat.p12').exists()) {
+                          signingConfig signingConfigs.mchat
+                      }
+                  }
                   release {
                       minifyEnabled false
                   }
@@ -752,6 +768,17 @@ jobs:
           fi
           printf '%s' "$GSJ" > android/app/google-services.json
 
+      - name: Doimiy imzo kaliti (KEYSTORE_B64)
+        env:
+          KS: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            printf '%s' "$KS" | base64 -d > android/app/mchat.p12
+            echo "Doimiy imzo kaliti ishlatiladi"
+          else
+            echo "KEYSTORE_B64 yo'q: vaqtinchalik imzo ishlatiladi"
+          fi
+
       - name: Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -760,6 +787,11 @@ jobs:
       - name: APK yig'ish
         working-directory: android
         run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: APK imzosini ko'rsatish
+        run: |
+          APKS=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort | tail -1)
+          "$APKS" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | grep -E "SHA-256|DN" || true
 
       - name: APK ni faylga chiqarish
         uses: actions/upload-artifact@v4
